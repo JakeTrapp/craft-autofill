@@ -1,171 +1,270 @@
 (() => {
-    // Bootstraps the input runtime and wires UI events to the helper modules.
+    // Starts the workflow run only after Craft confirms the element has been saved.
     const runtime = window.AutofillInputRuntime || {};
+    const pendingPrefix = 'autofill:pending-run:';
+    const launcherStatePrefix = 'autofill:launcher-state:';
+
     const parseConfig = (root) => {
-        if (!(root instanceof HTMLElement)) {
-            return {};
-        }
-
-        const raw = String(root.dataset.autofillConfig || '').trim();
-        if (raw === '') {
-            return {};
-        }
-
+        if (!(root instanceof HTMLElement)) return {};
         try {
-            const parsed = JSON.parse(raw);
-            return parsed && typeof parsed === 'object' ? parsed : {};
-        } catch (_error) {
-            return {};
+            const config = JSON.parse(String(root.dataset.autofillConfig || '{}'));
+            return config && typeof config === 'object' ? config : {};
+        } catch (_error) { return {}; }
+    };
+
+    const pendingKey = (config) => `${pendingPrefix}${String(config.launcherKey || config.instanceId || config.workflowHandle || '')}`;
+    const launcherStateKey = (config) => `${launcherStatePrefix}${String(config.launcherKey || config.instanceId || config.workflowHandle || '')}`;
+    const isElementEditor = (editor) => editor && typeof editor.serializeForm === 'function' && typeof editor.prepareData === 'function';
+    const currentEditor = (root) => {
+        if (window.$) {
+            // A launcher inside a slideout must save that slideout's element,
+            // even when Craft's page-level editor is also present.
+            const activeSlideout = root?.closest?.('.slideout, [data-slideout]');
+            if (activeSlideout) {
+                const editorNodes = activeSlideout.querySelectorAll('[data-element-editor], form');
+                for (const editorNode of editorNodes) {
+                    const editor = window.$(editorNode).data('elementEditor');
+                    if (isElementEditor(editor)) return editor;
+                }
+            }
+        }
+        if (root instanceof HTMLElement && window.$) {
+            let cursor = root;
+            while (cursor) {
+                const editor = window.$(cursor).data('elementEditor');
+                if (isElementEditor(editor)) return editor;
+                cursor = cursor.parentElement;
+            }
+        }
+        const cp = window.Craft?.cp;
+        const candidates = [cp?.$primaryForm, cp?.$main];
+        for (const candidate of candidates) {
+            if (candidate && typeof candidate.data === 'function') {
+                const editor = candidate.data('elementEditor');
+                if (isElementEditor(editor)) return editor;
+            }
+        }
+        return null;
+    };
+
+    const execute = async (mode, request, config, reviewModal, root) => {
+        const base = { workflowHandle: config.workflowHandle, elementId: Number(config.elementId), siteId: Number(config.siteId) || null };
+        if (mode === 'preview') {
+            const data = await runtime.buildPromptPreview({ endpoint: config.promptPreviewActionUrl, ...base, userPrompt: request.userPrompt || '' });
+            const output = root?.querySelector('[data-autofill-preview]');
+            if (output instanceof HTMLTextAreaElement) output.value = data;
+            return;
+        }
+        const applySuggestionServer = async (suggestion) => {
+            await runtime.applySuggestionViaServer({ endpoint: config.applySuggestionActionUrl, ...base, suggestion });
+            return true;
+        };
+        if (mode === 'generate') {
+            reviewModal.showLoading('Waiting for response from AI...');
+            const suggestions = await runtime.generateSuggestions({ endpoint: config.generateSuggestionsActionUrl, ...base, userPrompt: request.userPrompt || '' });
+            const { reviewRequired, autoAppliedCount } = await runtime.collectReviewRequiredSuggestions(suggestions, applySuggestionServer, currentEditor(root)?.$container?.[0] || document);
+            finishSuggestions(reviewRequired, suggestions, request, config, reviewModal, autoAppliedCount);
+        } else if (mode === 'normalize') {
+            const suggestions = await runtime.normalizeResponse({ endpoint: config.responseNormalizeActionUrl, ...base, rawResponse: request.rawResponse || '' });
+            const { reviewRequired, autoAppliedCount } = await runtime.collectReviewRequiredSuggestions(suggestions, applySuggestionServer, currentEditor(root)?.$container?.[0] || document);
+            finishSuggestions(reviewRequired, suggestions, request, config, reviewModal, autoAppliedCount);
+        }
+    };
+
+    const finishSuggestions = (reviewSuggestions, suggestions, request, config, reviewModal, autoAppliedCount) => {
+        if (reviewSuggestions.length) {
+            reviewModal.setSuggestions(reviewSuggestions);
+            return;
+        }
+        reviewModal.clear();
+        if (autoAppliedCount > 0) {
+            window.sessionStorage.setItem(launcherStateKey(config), JSON.stringify(request || {}));
+            window.location.reload();
+            return;
+        }
+        const root = document.querySelector(`[data-autofill-instance-id="${CSS.escape(config.instanceId)}"]`);
+        statusMessage(root, suggestions.length ? 'No changes were applied.' : 'No suggestions were returned.');
+    };
+
+    const statusMessage = (root, message) => {
+        const node = root.querySelector('[data-autofill-run-status]');
+        if (node instanceof HTMLElement) { node.textContent = message; node.hidden = false; }
+        else window.alert(message);
+    };
+
+    const saveFirst = async (root, config, mode, request, reviewModal) => {
+        if (!config.workflowHandle) {
+            throw new Error('Choose a workflow before running Autofill.');
+        }
+        const editor = currentEditor(root);
+        if (!editor) {
+            throw new Error('Craft could not confirm whether this element has unsaved changes. Save the element, then try Autofill again.');
+        }
+        if (editor.submittingForm) {
+            throw new Error('Craft is already saving this element. Wait for the save to finish, then try again.');
+        }
+        const container = editor.$container?.[0];
+        if (!(container instanceof HTMLElement) || typeof editor.serializeForm !== 'function' || typeof editor.prepareData !== 'function') {
+            throw new Error('Craft could not verify the element editor state. Save the element, then try Autofill again.');
+        }
+        const baseline = window.$ ? window.$(container).data('initialSerializedValue') : undefined;
+        if (typeof baseline !== 'string') {
+            throw new Error('Craft could not verify whether this element has unsaved changes. Save it, then try Autofill again.');
+        }
+        if (editor.serializeForm(true) === baseline) {
+            if (!Number(config.elementId)) throw new Error('Save this element before running its Autofill workflow.');
+            return execute(mode, request, config, reviewModal, root);
+        }
+
+        if (typeof editor.checkForm === 'function') {
+            await editor.checkForm(false, false);
+        }
+        if (editor.serializeForm(true) === baseline) {
+            if (!Number(config.elementId)) throw new Error('Save this element before running its Autofill workflow.');
+            return execute(mode, request, config, reviewModal, root);
+        }
+
+        const nonce = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const key = pendingKey(config);
+        const pending = { nonce, mode, request, workflowHandle: config.workflowHandle, elementId: config.elementId, siteId: config.siteId, launcherKey: config.launcherKey };
+        window.sessionStorage.setItem(key, JSON.stringify(pending));
+        const serialized = editor.serializeForm(false);
+        const data = editor.prepareData(serialized);
+        if (!data || !editor._saveHeaders || typeof window.Craft?.sendActionRequest !== 'function') {
+            window.sessionStorage.removeItem(key);
+            throw new Error('Craft could not prepare this element save. Save it manually, then try Autofill again.');
+        }
+        editor.submittingForm = true;
+        editor.$actionBtn?.addClass?.('loading');
+        try {
+            const response = await window.Craft.sendActionRequest('POST', null, { headers: editor._saveHeaders, data });
+            const responseData = response?.data || response || {};
+            if (responseData.success === false || responseData.data?.success === false) {
+                window.sessionStorage.removeItem(key);
+                const message = responseData.message || responseData.error || responseData.data?.message || responseData.data?.error || 'Craft could not save this element.';
+                throw new Error(`${message} Autofill was not started.`);
+            }
+            const savedElement = responseData.element || responseData.data?.element || {};
+            const savedElementId = Number(savedElement.id || responseData.elementId || responseData.data?.elementId || config.elementId);
+            const editorUrl = savedElement.cpEditUrl || responseData.cpEditUrl || responseData.data?.cpEditUrl;
+            if (!savedElementId) {
+                window.sessionStorage.removeItem(key);
+                throw new Error('Craft saved the element, but did not return its saved ID. Autofill was not started.');
+            }
+            if (!editorUrl && !Number(config.elementId)) {
+                window.sessionStorage.removeItem(key);
+                throw new Error('Craft saved the element, but did not return its editor URL. Autofill was not started.');
+            }
+            const returnUrl = new URL(editorUrl || window.location.href, window.location.href);
+            returnUrl.searchParams.set('autofillSaveToken', nonce);
+            window.location.assign(returnUrl.toString());
+        } catch (error) {
+            window.sessionStorage.removeItem(key);
+            editor.submittingForm = false;
+            editor.$actionBtn?.removeClass?.('loading');
+            const message = error?.response?.data?.message || error?.message || 'Craft could not save this element.';
+            throw new Error(message.includes('Autofill was not started.') ? message : `${message} Autofill was not started.`);
+        }
+    };
+
+    const restorePendingRun = async (root, config, reviewModal) => {
+        const key = pendingKey(config);
+        const pending = window.sessionStorage.getItem(key);
+        if (!pending) return;
+        const url = new URL(window.location.href);
+        let data;
+        try { data = JSON.parse(pending); } catch (_error) { window.sessionStorage.removeItem(key); return; }
+        if (data.launcherKey && data.launcherKey !== config.launcherKey) return;
+        if (!url.searchParams.has('autofillSaveToken')) {
+            window.sessionStorage.removeItem(key);
+            statusMessage(root, 'Craft did not complete the save, so Autofill was not started. Review the save errors and try again.');
+            return;
+        }
+        if (url.searchParams.get('autofillSaveToken') !== data.nonce) return;
+        window.sessionStorage.removeItem(key);
+        url.searchParams.delete('autofillSaveToken');
+        window.history.replaceState({}, '', url.toString());
+        if (!Number(config.elementId)) {
+            statusMessage(root, 'Craft saved the element, but its editor did not provide a saved element ID. Open the saved element and run Autofill again.');
+            return;
+        }
+        try { await execute(data.mode, data.request || {}, config, reviewModal, root); }
+        catch (error) {
+            reviewModal.clear();
+            statusMessage(root, error instanceof Error ? error.message : 'Could not complete Autofill request.');
         }
     };
 
     const initAutofillRuntime = (root) => {
-        if (!(root instanceof HTMLElement) || root.dataset.autofillInitialized === '1') {
-            return;
-        }
-
+        if (!(root instanceof HTMLElement) || root.dataset.autofillInitialized === '1') return;
         const generateButton = root.querySelector('[data-autofill-generate]');
         const userPromptInput = root.querySelector('[data-autofill-user-prompt]');
         const previewOutput = root.querySelector('[data-autofill-preview]');
         const responseInput = root.querySelector('[data-autofill-response-input]');
         const parseResponseButton = root.querySelector('[data-autofill-parse-response]');
-        if (!(generateButton instanceof HTMLButtonElement)) {
-            return;
-        }
+        if (!(generateButton instanceof HTMLButtonElement)) return;
 
         const config = parseConfig(root);
         runtime.iconSvgActionUrl = String(config.iconSvgActionUrl || runtime.iconSvgActionUrl || '');
         const isTestMode = config.testMode !== false;
-
+        const userPrompt = () => userPromptInput instanceof HTMLTextAreaElement ? userPromptInput.value : '';
+        const savedLauncherState = window.sessionStorage.getItem(launcherStateKey(config));
+        if (savedLauncherState) {
+            window.sessionStorage.removeItem(launcherStateKey(config));
+            try {
+                const state = JSON.parse(savedLauncherState);
+                if (userPromptInput instanceof HTMLTextAreaElement && typeof state.userPrompt === 'string') userPromptInput.value = state.userPrompt;
+                if (responseInput instanceof HTMLTextAreaElement && typeof state.rawResponse === 'string') responseInput.value = state.rawResponse;
+            } catch (_error) { /* Ignore invalid transient state. */ }
+        }
         const applySuggestionServer = async (suggestion) => {
-            const applySuggestionActionUrl = config.applySuggestionActionUrl || '';
-            const fieldId = Number(config.fieldId || 0);
-            const entryId = Number(config.entryId || 0);
-            const siteId = Number(config.siteId || 0);
-
-            if (!applySuggestionActionUrl || !fieldId || !entryId) {
-                throw new Error('Server-side suggestion apply is not configured for this entry. Save the entry first, then retry.');
-            }
-
             await runtime.applySuggestionViaServer({
-                endpoint: applySuggestionActionUrl,
-                fieldId,
-                entryId,
-                siteId: siteId || null,
+                endpoint: config.applySuggestionActionUrl,
+                workflowHandle: config.workflowHandle,
+                elementId: Number(config.elementId),
+                siteId: Number(config.siteId) || null,
                 suggestion,
             });
-
             return true;
         };
-
-        const reviewModal = runtime.createReviewModal({
-            applySuggestion: applySuggestionServer,
-            focusMatchedField: runtime.focusMatchedField,
-            fieldId: Number(config.fieldId || 0),
-        });
-
-        const currentUserPrompt = () => (
-            userPromptInput instanceof HTMLTextAreaElement ? userPromptInput.value : ''
-        );
-
-        const startReviewFlow = async (suggestions) => {
-            const reviewSuggestions = await runtime.collectReviewRequiredSuggestions(suggestions, applySuggestionServer);
-            reviewModal.setSuggestions(reviewSuggestions);
+        const editorRoot = currentEditor(root)?.$container?.[0] || document;
+        const reviewModal = runtime.createReviewModal({ applySuggestion: applySuggestionServer, focusMatchedField: runtime.focusMatchedField, instanceId: config.instanceId, fieldRoot: editorRoot });
+        const lockButton = async (button, callback) => {
+            button.disabled = true;
+            try { await callback(); }
+            catch (error) {
+                reviewModal.clear();
+                statusMessage(root, error instanceof Error ? error.message : 'Could not complete Autofill request.');
+            }
+            finally { button.disabled = false; }
         };
 
-        generateButton.addEventListener('click', async () => {
-            const fieldId = Number(config.fieldId || 0);
-            if (!fieldId) {
-                window.alert('Autofill field is not configured.');
-                return;
-            }
+        generateButton.addEventListener('click', () => lockButton(generateButton, () => saveFirst(
+            root,
+            config,
+            isTestMode ? 'preview' : 'generate',
+            { userPrompt: userPrompt() },
+            reviewModal,
+        )));
 
-            generateButton.disabled = true;
-            try {
-                if (isTestMode) {
-                    const promptPreviewActionUrl = config.promptPreviewActionUrl || '';
-                    if (!(previewOutput instanceof HTMLTextAreaElement) || !promptPreviewActionUrl) {
-                        window.alert('Prompt preview endpoint is not configured.');
-                        return;
-                    }
-
-                    previewOutput.value = 'Building prompt preview...';
-                    previewOutput.value = await runtime.buildPromptPreview({
-                        endpoint: promptPreviewActionUrl,
-                        fieldId,
-                        userPrompt: currentUserPrompt(),
-                        entryId: Number(config.entryId || 0),
-                        siteId: Number(config.siteId || 0) || null,
-                    });
-                    return;
-                }
-
-                const generateSuggestionsActionUrl = config.generateSuggestionsActionUrl || '';
-                if (!generateSuggestionsActionUrl) {
-                    window.alert('AI generate endpoint is not configured.');
-                    return;
-                }
-
-                reviewModal.showLoading('Waiting for response from AI...');
-                reviewModal.positionBelowField(generateButton);
-                const suggestions = await runtime.generateSuggestions({
-                    endpoint: generateSuggestionsActionUrl,
-                    fieldId,
-                    userPrompt: currentUserPrompt(),
-                    entryId: Number(config.entryId || 0),
-                    siteId: Number(config.siteId || 0) || null,
-                });
-                await startReviewFlow(suggestions);
-            } catch (error) {
-                if (previewOutput instanceof HTMLTextAreaElement && isTestMode) {
-                    previewOutput.value = '';
-                }
-                reviewModal.clear();
-                window.alert(error instanceof Error ? error.message : 'Could not complete Autofill request.');
-            } finally {
-                generateButton.disabled = false;
-            }
-        });
-
-        if (
-            isTestMode &&
-            parseResponseButton instanceof HTMLButtonElement &&
-            responseInput instanceof HTMLTextAreaElement
-        ) {
-            parseResponseButton.addEventListener('click', async () => {
-                const responseNormalizeActionUrl = config.responseNormalizeActionUrl || '';
-                const fieldId = Number(config.fieldId || 0);
-                if (!responseNormalizeActionUrl || !fieldId) {
-                    window.alert('Response normalization endpoint is not configured.');
-                    return;
-                }
-
-                parseResponseButton.disabled = true;
-                try {
-                    const suggestions = await runtime.normalizeResponse({
-                        endpoint: responseNormalizeActionUrl,
-                        fieldId,
-                        rawResponse: responseInput.value,
-                        entryId: Number(config.entryId || 0),
-                        siteId: Number(config.siteId || 0) || null,
-                    });
-                    await startReviewFlow(suggestions);
-                } catch (error) {
-                    reviewModal.clear();
-                    window.alert(error instanceof Error ? error.message : 'Could not normalize response.');
-                } finally {
-                    parseResponseButton.disabled = false;
-                }
-            });
+        if (isTestMode && parseResponseButton instanceof HTMLButtonElement && responseInput instanceof HTMLTextAreaElement) {
+            parseResponseButton.addEventListener('click', () => lockButton(parseResponseButton, () => saveFirst(
+                root, config, 'normalize', { rawResponse: responseInput.value }, reviewModal,
+            )));
         }
 
         document.addEventListener('click', reviewModal.handleDocumentClick);
         window.addEventListener('resize', reviewModal.refreshSpotlight, { passive: true });
         document.addEventListener('scroll', reviewModal.refreshSpotlight, { passive: true, capture: true });
+        const removalObserver = new MutationObserver(() => {
+            if (root.isConnected) return;
+            removalObserver.disconnect();
+            reviewModal.destroy();
+        });
+        removalObserver.observe(document.documentElement, { childList: true, subtree: true });
         root.dataset.autofillInitialized = '1';
+        restorePendingRun(root, config, reviewModal);
     };
 
-    document.querySelectorAll('[data-autofill-runtime]').forEach((root) => {
-        initAutofillRuntime(root);
-    });
+    document.querySelectorAll('[data-autofill-runtime]').forEach(initAutofillRuntime);
 })();

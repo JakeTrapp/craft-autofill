@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace jtdev\craftautofill\services\fields\adapters;
 
+use craft\base\ElementInterface;
 use craft\base\FieldInterface;
 use craft\elements\Entry;
 use craft\fields\Table as TableField;
@@ -161,7 +162,7 @@ class TableFieldAdapter implements FieldAdapterInterface
         return $this->normalizeRows($field, $value) ?? [];
     }
 
-    public function applySuggestionToEntry(FieldInterface $field, Entry $entry, mixed $value): mixed
+    public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed
     {
         if (!$field instanceof TableField) {
             throw new RuntimeException('Table suggestion adapter received an unsupported field.');

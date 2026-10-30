@@ -9,7 +9,7 @@ use craft\helpers\Json;
 use craft\web\Controller;
 use jtdev\craftautofill\AutofillPlugin;
 use jtdev\craftautofill\fields\AutofillField;
-use jtdev\craftautofill\models\ai\OpenAiConfig;
+use jtdev\craftautofill\models\ai\AiModelConfig;
 use RuntimeException;
 use Throwable;
 use yii\web\Response;
@@ -36,6 +36,8 @@ class PromptPreviewController extends Controller
                     'error' => 'Autofill field ID was invalid.',
                 ]);
             }
+
+            AutofillPlugin::getInstance()->getWorkflowRuntimeService()->authorizeField($fieldId, $entryId, $siteId);
 
             $prompt = AutofillPlugin::getInstance()->getAiService()->buildAutofillPromptPreview(
                 (string)($body['userPrompt'] ?? ''),
@@ -85,6 +87,8 @@ class PromptPreviewController extends Controller
                 ]);
             }
 
+            AutofillPlugin::getInstance()->getWorkflowRuntimeService()->authorizeField($fieldId, $entryId, $siteId);
+
             $field = $this->resolveAutofillField($fieldId);
             $modelConfig = $this->resolveModelConfigForField($field);
             $plugin = AutofillPlugin::getInstance();
@@ -96,6 +100,12 @@ class PromptPreviewController extends Controller
                 $modelConfig,
                 ['fieldId' => $fieldId]
             );
+            $definition = $this->resolveAutofillField($fieldId);
+            $targetElement = Craft::$app->getElements()->getElementById($entryId, \craft\elements\Entry::class, $siteId);
+            if ($targetElement !== null) {
+                $plugin->getWorkflowRuntimeService()->assertCanSave($targetElement);
+                $request->fileInputs = (new \jtdev\craftautofill\services\assets\AssetInputService())->collect($definition, $targetElement)['files'];
+            }
             $detailedResult = $aiService->generateFromRequestDetailed($request, $modelConfig);
             $generationResult = $detailedResult['result'];
             $rawResponse = $detailedResult['rawResponse'];
@@ -105,12 +115,7 @@ class PromptPreviewController extends Controller
                 ? $rawResponse['id']
                 : null;
             $latencyMs = (int)round((microtime(true) - $startedAt) * 1000);
-            $requestPayload = [
-                'model' => $modelConfig->modelId,
-                'reasoningEffort' => $modelConfig->reasoningEffort,
-                'messages' => $request->messages,
-                'context' => $request->context,
-            ];
+            $requestPayload = $request->safeLogPayload();
             $logId = $plugin->getAiRequestLogService()->begin([
                 'fieldId' => $fieldId,
                 'entryId' => $entryId > 0 ? $entryId : null,
@@ -308,10 +313,21 @@ class PromptPreviewController extends Controller
             throw new RuntimeException(sprintf('Autofill field %d could not be found.', $fieldId));
         }
 
+        if ($field->workflowHandle !== '') {
+            $workflow = AutofillPlugin::getInstance()->getWorkflowService()->resolveForField($field);
+            if ($workflow === null) {
+                throw new RuntimeException('This Autofill workflow is unavailable.');
+            }
+            $resolved = AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow);
+            $resolved->id = $field->id;
+            $resolved->uid = $field->uid;
+            $resolved->handle = $field->handle;
+            return $resolved;
+        }
         return $field;
     }
 
-    private function resolveModelConfigForField(AutofillField $field): OpenAiConfig
+    private function resolveModelConfigForField(AutofillField $field): AiModelConfig
     {
         $settings = AutofillPlugin::getInstance()->getSettings();
         $targetUid = trim($field->modelConfigUid);
@@ -346,7 +362,7 @@ class PromptPreviewController extends Controller
             throw new RuntimeException('No enabled AI model configuration is available.');
         }
 
-        $modelConfig = new OpenAiConfig($chosen);
+        $modelConfig = AutofillPlugin::getInstance()->getAiService()->createModelConfig($chosen);
         if (!$modelConfig->validate()) {
             $message = implode(' ', array_values($modelConfig->getFirstErrors()));
             throw new RuntimeException($message !== '' ? $message : 'Selected AI model configuration is invalid.');

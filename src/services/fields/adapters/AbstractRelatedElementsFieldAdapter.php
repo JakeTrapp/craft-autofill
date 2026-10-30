@@ -127,7 +127,7 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
         return $normalized;
     }
 
-    public function applySuggestionToEntry(FieldInterface $field, Entry $entry, mixed $value): mixed
+    public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed
     {
         $titles = $this->normalizeSuggestion($field, $value);
         if (!is_array($titles)) {

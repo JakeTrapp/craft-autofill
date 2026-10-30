@@ -6,6 +6,8 @@ namespace jtdev\craftautofill\services\ai;
 
 use Craft;
 use craft\base\Component;
+use craft\base\ElementInterface;
+use craft\elements\Asset;
 use craft\elements\Entry;
 use jtdev\craftautofill\AutofillPlugin;
 use jtdev\craftautofill\fields\AutofillField;
@@ -17,13 +19,31 @@ class AutofillFieldConfigBuilder extends Component
     /**
      * @return array<string, mixed>
      */
+    public ?AutofillField $definitionOverride = null;
+    public ?ElementInterface $elementOverride = null;
+
+    public function buildForElement(AutofillField $definition, ElementInterface $element): array
+    {
+        $builder = clone $this;
+        $builder->definitionOverride = $definition;
+        $builder->elementOverride = $element;
+        return $builder->buildFromFieldId(0, (int)$element->id, $element->siteId);
+    }
+
     public function buildFromFieldId(int $fieldId, ?int $entryId = null, ?int $siteId = null): array
     {
-        $field = Craft::$app->getFields()->getFieldById($fieldId);
+        $field = $this->definitionOverride ?? Craft::$app->getFields()->getFieldById($fieldId);
         if (!$field instanceof AutofillField) {
             throw new RuntimeException(sprintf('Autofill field %d could not be found.', $fieldId));
         }
 
+        if ($this->definitionOverride === null && $field->workflowHandle !== '') {
+            $workflow = AutofillPlugin::getInstance()->getWorkflowService()->resolveForField($field);
+            if ($workflow === null) {
+                throw new RuntimeException('Autofill workflow is unavailable.');
+            }
+            $field = AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow);
+        }
         $fieldContractsByUid = [];
         $fieldNameByUid = [];
         $fieldHandleByUid = [];
@@ -42,7 +62,7 @@ class AutofillFieldConfigBuilder extends Component
             $contextValueByUid[$uid] = '';
         }
 
-        $entry = $this->resolveEntry($entryId, $siteId);
+        $entry = $this->elementOverride ?? $this->resolveEntry($entryId, $siteId);
         $adapterService = AutofillPlugin::getInstance()->getFieldAdapterService();
         $rowPromptConfigByUid = [];
         foreach ($field->rows as $row) {
@@ -64,10 +84,12 @@ class AutofillFieldConfigBuilder extends Component
             }
         }
 
-        if ($field->entryTypeUid !== '') {
-            $entryType = Craft::$app->getEntries()->getEntryTypeByUid($field->entryTypeUid);
+        if ($field->entryTypeUid !== '' || $field->volumeUid !== '') {
+            $scope = $field->volumeUid !== ''
+                ? Craft::$app->getVolumes()->getVolumeByUid($field->volumeUid)
+                : Craft::$app->getEntries()->getEntryTypeByUid($field->entryTypeUid);
 
-            foreach ($entryType?->getFieldLayout()->getCustomFields() ?? [] as $layoutField) {
+            foreach ($scope?->getFieldLayout()->getCustomFields() ?? [] as $layoutField) {
                 $uid = trim((string)($layoutField->layoutElement->uid ?? ''));
                 if ($uid === '') {
                     $uid = trim((string)($layoutField->uid ?? ''));
@@ -104,6 +126,24 @@ class AutofillFieldConfigBuilder extends Component
             $contextValueByUid['__native__:expiryDate'] = $entry->expiryDate?->format(\DateTimeInterface::ATOM) ?? '';
         }
 
+        if ($entry instanceof Asset) {
+            $fieldNameByUid['__native__:alt'] = 'Alt text';
+            $fieldHandleByUid['__native__:alt'] = 'alt';
+            $fieldContractsByUid['__native__:alt'] = ['type' => 'string'];
+            $fieldAdapterKeyByUid['__native__:alt'] = 'plainText';
+            $contextValueByUid['__native__:alt'] = (string)$entry->alt;
+            $contextValueByUid['__native__:title'] = (string)$entry->title;
+            $fieldNameByUid['__asset__:file'] = 'This asset’s file';
+            $fieldHandleByUid['__asset__:file'] = '__file';
+            $fieldContractsByUid['__asset__:file'] = ['type' => 'file'];
+        }
+
+        if ($entry instanceof ElementInterface) {
+            $inputs = (new \jtdev\craftautofill\services\assets\AssetInputService())->collect($field, $entry, false);
+            foreach ($inputs['metadata'] as $uid => $metadata) {
+                $contextValueByUid[$uid] = json_encode($metadata, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            }
+        }
         return [
             'globalPrompt' => $field->globalPrompt,
             'rows' => $field->rows,
@@ -132,9 +172,9 @@ class AutofillFieldConfigBuilder extends Component
         return $resolved instanceof Entry ? $resolved : null;
     }
 
-    private function resolveCustomFieldRawValue(?Entry $entry, mixed $handle): mixed
+    private function resolveCustomFieldRawValue(?ElementInterface $entry, mixed $handle): mixed
     {
-        if (!$entry instanceof Entry) {
+        if (!$entry instanceof ElementInterface) {
             return null;
         }
 

@@ -47,7 +47,7 @@ class AutofillPlugin extends Plugin
     public const EDITION_LITE = 'lite';
     public const EDITION_PRO = 'pro';
 
-    public string $schemaVersion = '1.0.0';
+    public string $schemaVersion = '2.0.0';
     public bool $hasCpSettings = true;
     public bool $hasCpSection = true;
 
@@ -63,6 +63,8 @@ class AutofillPlugin extends Plugin
     {
         return [
             'components' => [
+                'workflowService' => \jtdev\craftautofill\services\workflows\WorkflowService::class,
+                'workflowRuntimeService' => \jtdev\craftautofill\services\workflows\WorkflowRuntimeService::class,
                 'aiRequestLogService' => AiRequestLogService::class,
                 'aiService' => AiService::class,
                 'bulkAutofillService' => BulkAutofillService::class,
@@ -101,6 +103,16 @@ class AutofillPlugin extends Plugin
             'plugin' => $this,
             'settings' => $settings,
         ]);
+    }
+
+    public function getWorkflowService(): \jtdev\craftautofill\services\workflows\WorkflowService
+    {
+        return $this->get('workflowService');
+    }
+
+    public function getWorkflowRuntimeService(): \jtdev\craftautofill\services\workflows\WorkflowRuntimeService
+    {
+        return $this->get('workflowRuntimeService');
     }
 
     public function getAiService(): AiService
@@ -145,7 +157,7 @@ class AutofillPlugin extends Plugin
             return null;
         }
 
-        $item['url'] = 'autofill/bulk';
+        $item['url'] = Craft::$app->getUser()->getIsAdmin() ? 'autofill/workflows' : 'autofill/bulk';
         $item['subnav'] = [
             'bulk' => [
                 'label' => Craft::t('autofill', 'Bulk Autofill'),
@@ -157,6 +169,9 @@ class AutofillPlugin extends Plugin
             ],
         ];
 
+        if (Craft::$app->getUser()->getIsAdmin()) {
+            $item['subnav'] = ['workflows' => ['label' => 'Workflows', 'url' => 'autofill/workflows']] + $item['subnav'];
+        }
         return $item;
     }
 
@@ -203,11 +218,40 @@ class AutofillPlugin extends Plugin
 
     private function attachEventHandlers(): void
     {
+        Event::on(\craft\base\Element::class, \craft\base\Element::EVENT_DEFINE_SIDEBAR_HTML,
+            static function(\craft\events\DefineHtmlEvent $event): void {
+                $element = $event->sender;
+                if ($event->static || (!$element instanceof \craft\elements\Entry && !$element instanceof \craft\elements\Asset)) {
+                    return;
+                }
+                $plugin = self::getInstance();
+                foreach ($plugin->getWorkflowService()->getAll() as $workflow) {
+                    if (!$workflow->showOnSidebar) {
+                        continue;
+                    }
+                    try {
+                        $plugin->getWorkflowRuntimeService()->assertScope($workflow, $element);
+                        $plugin->getWorkflowRuntimeService()->assertCanSave($element);
+                    } catch (\Throwable) {
+                        continue;
+                    }
+                    $field = $plugin->getWorkflowService()->asField($workflow);
+                    $event->html .= Craft::$app->getView()->renderTemplate('autofill/fields/autofill/input', [
+                        'field' => $field, 'element' => $element, 'sidebar' => true,
+                        'testMode' => $plugin->getSettings()->testMode,
+                    ]);
+                }
+            }
+        );
         Event::on(
             UrlManager::class,
             UrlManager::EVENT_REGISTER_CP_URL_RULES,
             static function(RegisterUrlRulesEvent $event): void {
-                $event->rules['autofill'] = 'autofill/bulk/index';
+                $event->rules['autofill'] = 'autofill/workflows/index';
+                $event->rules['autofill/workflows'] = 'autofill/workflows/index';
+                $event->rules['autofill/workflows/new'] = 'autofill/workflows/edit';
+                $event->rules['autofill/workflows/edit/<handle:[a-zA-Z][a-zA-Z0-9_-]*>'] = 'autofill/workflows/edit';
+                $event->rules['autofill/workflows/<handle:[a-zA-Z][a-zA-Z0-9_-]*>'] = 'autofill/workflows/edit';
                 $event->rules['autofill/bulk'] = 'autofill/bulk/index';
                 $event->rules['autofill/logs'] = 'autofill/logs/index';
             }
@@ -263,7 +307,15 @@ class AutofillPlugin extends Plugin
                 continue;
             }
 
-            $configuredEntryTypeUid = trim($field->entryTypeUid);
+            if ($field->workflowHandle !== '') {
+                $workflow = self::getInstance()->getWorkflowService()->getByHandle($field->workflowHandle);
+                if ($workflow === null) {
+                    continue;
+                }
+                $configuredEntryTypeUid = $workflow->scope === 'entry' ? $workflow->entryTypeUid : '__asset__';
+            } else {
+                $configuredEntryTypeUid = trim($field->entryTypeUid);
+            }
             if ($configuredEntryTypeUid === $expectedEntryTypeUid) {
                 continue;
             }

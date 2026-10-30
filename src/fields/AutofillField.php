@@ -8,6 +8,8 @@ use Craft;
 use craft\base\ElementInterface;
 use craft\base\Field;
 use craft\base\FieldInterface;
+use craft\elements\Asset;
+use craft\elements\Entry;
 use craft\models\EntryType;
 use jtdev\craftautofill\AutofillPlugin;
 
@@ -15,6 +17,9 @@ class AutofillField extends Field
 {
     public string $entryTypeUid = '';
     public string $modelConfigUid = '';
+    public string $workflowHandle = '';
+    public string $scope = 'entry';
+    public string $volumeUid = '';
     public string $globalPrompt = '';
     public string $actionButtonLabel = '';
     public bool $showUserPromptInput = true;
@@ -58,6 +63,7 @@ class AutofillField extends Field
     {
         parent::init();
         $this->globalPrompt = trim($this->globalPrompt);
+        $this->workflowHandle = trim($this->workflowHandle);
         $this->actionButtonLabel = trim($this->actionButtonLabel);
         $this->showUserPromptInput = $this->toBool($this->showUserPromptInput);
         $this->rows = $this->normalizeRows($this->rows);
@@ -67,22 +73,32 @@ class AutofillField extends Field
     protected function defineRules(): array
     {
         $rules = parent::defineRules();
-        $rules[] = [['entryTypeUid', 'modelConfigUid', 'globalPrompt', 'actionButtonLabel'], 'string'];
+        $rules[] = [['entryTypeUid', 'modelConfigUid', 'globalPrompt', 'actionButtonLabel', 'workflowHandle'], 'string'];
         $rules[] = ['showUserPromptInput', 'boolean'];
         $rules[] = ['globalPrompt', 'filter', 'filter' => 'trim'];
         $rules[] = ['actionButtonLabel', 'filter', 'filter' => 'trim'];
-        $rules[] = ['rows', 'validateRows'];
-        $rules[] = ['contextRows', 'validateContextRows'];
-        $rules[] = [['rows', 'contextRows'], 'validateUniqueFieldSelections'];
-        $rules[] = ['entryTypeUid', 'validateEntryTypeUid'];
-        $rules[] = ['modelConfigUid', 'validateModelConfigUid'];
-        $rules[] = ['name', 'validateEditionFieldLimit'];
+        $rules[] = ['rows', 'validateLegacyConfiguration', 'when' => fn(): bool => $this->workflowHandle === ''];
 
         return $rules;
     }
 
+    public function settingsAttributes(): array
+    {
+        return $this->workflowHandle !== '' ? ['workflowHandle'] : parent::settingsAttributes();
+    }
+
     public function getSettingsHtml(): ?string
     {
+        if ($this->workflowHandle !== '' || ($this->entryTypeUid === '' && $this->rows === [] && $this->contextRows === [])) {
+            return Craft::$app->getView()->renderTemplate('autofill/fields/autofill/reference-settings', [
+                'field' => $this,
+                'workflowOptions' => array_map(
+                    static fn($workflow): array => ['label' => $workflow->name, 'value' => $workflow->handle],
+                    AutofillPlugin::getInstance()->getWorkflowService()->getAll(),
+                ),
+            ]);
+        }
+
         $selectedEntryType = $this->getSelectedEntryType();
         $supportedFields = $selectedEntryType
             ? AutofillPlugin::getInstance()->getFieldDiscoveryService()->getSupportedEntryTypeFields($selectedEntryType)
@@ -107,6 +123,39 @@ class AutofillField extends Field
 
     protected function inputHtml(mixed $value, ?ElementInterface $element, bool $inline): string
     {
+        if ($this->workflowHandle !== '') {
+            $workflow = AutofillPlugin::getInstance()->getWorkflowService()->getByHandle($this->workflowHandle);
+            if ($workflow === null) {
+                return '';
+            }
+
+            if ($workflow->scope === 'entry') {
+                if (!$element instanceof Entry || (string)$element->getType()->uid !== $workflow->entryTypeUid) {
+                    return '';
+                }
+            } elseif ($workflow->scope === 'asset') {
+                if (!$element instanceof Asset || $element->getVolume()->uid !== $workflow->volumeUid) {
+                    return '';
+                }
+            } else {
+                return '';
+            }
+
+            $field = AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow);
+            $field->id = $this->id;
+            $field->uid = $this->uid;
+            $field->handle = $this->handle;
+            return Craft::$app->getView()->renderTemplate('autofill/fields/autofill/input.twig', [
+                'field' => $field,
+                'element' => $element,
+                'testMode' => AutofillPlugin::getInstance()->getSettings()->testMode,
+            ]);
+        }
+
+        if ($this->entryTypeUid === '' && $this->rows === [] && $this->contextRows === []) {
+            return '';
+        }
+
         return Craft::$app->getView()->renderTemplate('autofill/fields/autofill/input.twig', [
             'field' => $this,
             'element' => $element,
@@ -138,6 +187,15 @@ class AutofillField extends Field
                 ));
             }
         }
+    }
+
+    public function validateLegacyConfiguration(): void
+    {
+        $this->validateRows();
+        $this->validateContextRows();
+        $this->validateUniqueFieldSelections();
+        $this->validateEntryTypeUid();
+        $this->validateModelConfigUid();
     }
 
     public function validateContextRows(): void
@@ -236,20 +294,6 @@ class AutofillField extends Field
         $this->addError('modelConfigUid', 'Selected model config no longer exists.');
     }
 
-    public function validateEditionFieldLimit(): void
-    {
-        if (AutofillPlugin::getInstance()->isProEdition() || !$this->getIsNew()) {
-            return;
-        }
-
-        foreach (Craft::$app->getFields()->getAllFields() as $field) {
-            if ($field instanceof self) {
-                $this->addError('name', 'Autofill Lite supports one Autofill field. Upgrade to Autofill Pro to add more.');
-                return;
-            }
-        }
-    }
-
     /**
      * @param mixed $rows
      * @return array<int, array<string, mixed>>
@@ -292,6 +336,7 @@ class AutofillField extends Field
                 'seomatic' => $seomatic,
                 'related' => $related,
                 'link' => $link,
+                'assets' => is_array($row['assets'] ?? null) ? $row['assets'] : [],
             ];
         }
 
@@ -326,6 +371,7 @@ class AutofillField extends Field
                 'fieldUid' => $fieldUid,
                 'prompt' => $prompt,
                 'enabled' => $enabled,
+                'assets' => is_array($row['assets'] ?? null) ? $row['assets'] : [],
             ];
         }
 

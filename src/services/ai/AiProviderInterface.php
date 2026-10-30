@@ -12,7 +12,8 @@ interface AiProviderInterface
     public function getProviderKey(): string;
 
     /**
-     * Sends a typed generation request to the provider and returns raw provider payload.
+     * Sends a typed generation request and returns a provider-neutral envelope.
+     * The original provider payload is retained under providerRaw for diagnostics.
      */
     public function generate(AiGenerationRequest $request, Model $providerConfig): array;
 }

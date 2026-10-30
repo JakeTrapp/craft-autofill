@@ -1,0 +1,13 @@
+<div class="field">
+    <div class="heading"><label for="workflowHandle">Workflow</label></div>
+    <div class="input ltr">
+        <input class="text fullwidth code" id="workflowHandle" name="workflowHandle" value="{{ field.workflowHandle|e }}" list="autofill-workflow-handles" placeholder="my-workflow">
+        <datalist id="autofill-workflow-handles">
+            {% for workflowOption in workflowOptions %}
+                <option value="{{ workflowOption.value|e }}">{{ workflowOption.label|e }}</option>
+            {% endfor %}
+        </datalist>
+    </div>
+    <p class="instructions">Enter a workflow handle. If it does not exist in this environment yet, the field stays hidden until you create a matching workflow.</p>
+    <p class="instructions"><a href="{{ url('autofill/workflows') }}">Manage workflows</a></p>
+</div>

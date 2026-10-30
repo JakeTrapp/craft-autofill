@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace jtdev\craftautofill\services\fields\adapters;
 
+use craft\base\ElementInterface;
 use craft\base\FieldInterface;
 use craft\elements\Entry;
 use RuntimeException;
@@ -146,7 +147,7 @@ class SeomaticFieldAdapter implements FieldAdapterInterface
         return $this->normalizeSeoPatch($value);
     }
 
-    public function applySuggestionToEntry(FieldInterface $field, Entry $entry, mixed $value): mixed
+    public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed
     {
         $patch = $this->normalizeSeoPatch($value);
         $handle = (string)($field->handle ?? '');

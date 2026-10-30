@@ -209,13 +209,13 @@
             return true;
         };
 
-        let input = runtime.findFieldInputByHandle(matchedHandle);
+        let input = runtime.findFieldInputByHandle(matchedHandle, options.root || document);
         if (!(input instanceof HTMLElement) || !hasVisibleBox(input)) {
             const sidebarOpened = openDetailsSidebar();
-            input = runtime.findFieldInputByHandle(matchedHandle);
+            input = runtime.findFieldInputByHandle(matchedHandle, options.root || document);
             if ((!(input instanceof HTMLElement) || !hasVisibleBox(input)) && sidebarOpened) {
                 window.setTimeout(() => {
-                    prepareMatchedInput(runtime.findFieldInputByHandle(matchedHandle));
+                    prepareMatchedInput(runtime.findFieldInputByHandle(matchedHandle, options.root || document));
                 }, 120);
                 return;
             }

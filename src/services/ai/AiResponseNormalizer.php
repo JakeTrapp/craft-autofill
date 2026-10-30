@@ -29,6 +29,18 @@ class AiResponseNormalizer extends Component
         $this->fieldConfigBuilder ??= new AutofillFieldConfigBuilder();
     }
 
+    public ?AutofillField $definitionOverride = null;
+
+    public function normalizeForElement(string $rawResponse, AutofillField $definition, \craft\base\ElementInterface $element): AiGenerationResult
+    {
+        $normalizer = clone $this;
+        $normalizer->definitionOverride = $definition;
+        $normalizer->fieldConfigBuilder = clone $this->fieldConfigBuilder;
+        $normalizer->fieldConfigBuilder->definitionOverride = $definition;
+        $normalizer->fieldConfigBuilder->elementOverride = $element;
+        return $normalizer->normalizeAutofillResponse($rawResponse, 0, (int)$element->id, $element->siteId);
+    }
+
     public function normalize(array $rawResponse, AiGenerationRequest $request): AiGenerationResult
     {
         $text = $this->extractText($rawResponse);
@@ -722,7 +734,11 @@ class AiResponseNormalizer extends Component
 
     private function resolveAutofillField(int $fieldId): ?AutofillField
     {
-        $field = Craft::$app->getFields()->getFieldById($fieldId);
+        $field = $this->definitionOverride ?? Craft::$app->getFields()->getFieldById($fieldId);
+        if ($field instanceof AutofillField && $this->definitionOverride === null && $field->workflowHandle !== '') {
+            $workflow = AutofillPlugin::getInstance()->getWorkflowService()->resolveForField($field);
+            return $workflow ? AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow) : null;
+        }
         return $field instanceof AutofillField ? $field : null;
     }
 

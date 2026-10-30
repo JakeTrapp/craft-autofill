@@ -6,6 +6,7 @@ namespace jtdev\craftautofill\services\fields\adapters;
 
 use CommerceGuys\Addressing\Country\Country as CountryModel;
 use Craft;
+use craft\base\ElementInterface;
 use craft\base\FieldInterface;
 use craft\elements\Entry;
 use craft\fields\Country;
@@ -107,7 +108,7 @@ class CountryFieldAdapter implements FieldAdapterInterface
         return $this->normalizeCountryCode($value);
     }
 
-    public function applySuggestionToEntry(FieldInterface $field, Entry $entry, mixed $value): mixed
+    public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed
     {
         $normalized = $this->normalizeCountryCode($value);
         $handle = (string)($field->handle ?? '');

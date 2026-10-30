@@ -27,6 +27,9 @@
 
 {% set providerOptions = [
     { label: 'OpenAI', value: 'openai' },
+    { label: 'Anthropic', value: 'anthropic' },
+    { label: 'DeepSeek', value: 'deepseek' },
+    { label: 'Google Gemini', value: 'gemini' },
 ] %}
 
 {% set reasoningOptions = [
@@ -34,6 +37,8 @@
     { label: 'Low', value: 'low' },
     { label: 'Medium', value: 'medium' },
     { label: 'High', value: 'high' },
+    { label: 'Max', value: 'max' },
+    { label: 'None', value: 'none' },
 ] %}
 
 {% set envSuggestions = plugin.getEnvSuggestionsForAutosuggest() %}
@@ -94,7 +99,7 @@
             heading: 'API Key Env',
             suggestions: envSuggestions,
             suggestEnvVars: true,
-            placeholder: '$OPENAI_API_KEY',
+            placeholder: '$PROVIDER_API_KEY',
         },
         modelId: {
             type: 'singleline',
@@ -119,7 +124,7 @@
     allowReorder: true,
     defaultValues: {
         provider: 'openai',
-        apiKeyEnv: '$OPENAI_API_KEY',
+        apiKeyEnv: '$PROVIDER_API_KEY',
         enabled: true,
     },
     fullWidth: true,
@@ -150,17 +155,40 @@
             input.className = 'text fullwidth';
             input.name = textarea.name;
             input.value = textarea.value;
-            input.placeholder = '$OPENAI_API_KEY';
+            input.placeholder = '$PROVIDER_API_KEY';
             input.setAttribute('list', datalistId);
             textarea.replaceWith(input);
         });
     };
 
+    const syncReasoningOptions = (row) => {
+        const provider = row.querySelector('select[name$="[provider]"]')?.value || 'openai';
+        const select = row.querySelector('select[name$="[reasoningEffort]"]');
+        if (!select) return;
+        const values = {
+            openai: ['', 'low', 'medium', 'high'],
+            deepseek: ['', 'none', 'low', 'high', 'max'],
+            anthropic: [''],
+            gemini: [''],
+        }[provider] || [''];
+        const labels = { '': 'Default', low: 'Low', medium: 'Medium', high: 'High', max: 'Max', none: 'None' };
+        const previous = select.value;
+        select.replaceChildren(...values.map((value) => new Option(labels[value], value)));
+        select.value = values.includes(previous) ? previous : '';
+    };
+
     repairAddedApiKeyInputs();
+    table.querySelectorAll('tbody tr').forEach(syncReasoningOptions);
+    table.addEventListener('change', (event) => {
+        if (event.target.matches('select[name$="[provider]"]')) syncReasoningOptions(event.target.closest('tr'));
+    });
 
     const editableTable = window.jQuery ? window.jQuery(table).data('editable-table') : null;
     if (editableTable && typeof editableTable.on === 'function') {
-        editableTable.on('addRow', repairAddedApiKeyInputs);
+        editableTable.on('addRow', () => {
+            repairAddedApiKeyInputs();
+            table.querySelectorAll('tbody tr').forEach(syncReasoningOptions);
+        });
     }
 
     table.parentElement?.querySelector('.add')?.addEventListener('click', () => {
@@ -170,7 +198,7 @@
 {% endjs %}
 
 <p class="light" style="margin-top: 10px;">
-    Current model IDs are listed in the <a href="https://developers.openai.com/api/docs/models/compare" rel="noopener" target="_blank">OpenAI model comparison table</a>.
+    Enter a model ID supported by your selected provider. Model IDs are managed by each provider and can change over time.
 </p>
 
 {{ forms.lightswitchField({

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace jtdev\craftautofill\services\fields\adapters;
 
+use craft\base\ElementInterface;
 use craft\base\FieldInterface;
 use craft\elements\Entry;
 use craft\fields\MultiSelect;
@@ -110,7 +111,7 @@ class MultiSelectFieldAdapter implements FieldAdapterInterface
         );
     }
 
-    public function applySuggestionToEntry(FieldInterface $field, Entry $entry, mixed $value): mixed
+    public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed
     {
         $normalized = $this->normalizeSuggestion($field, $value);
         $handle = (string)($field->handle ?? '');

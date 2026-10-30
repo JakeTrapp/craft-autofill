@@ -1,25 +1,34 @@
+{% do view.registerAssetBundle('jtdev\\craftautofill\\web\\assets\\cp\\AutofillCpAsset') %}
+{% set autofillLauncherKey = 'autofill-' ~ (field.workflowHandle ?? 'missing') ~ '-' ~ (field.uid ?? field.id ?? 'sidebar') %}
+{% set autofillInstanceId = autofillLauncherKey ~ '-' ~ random(2147483647) %}
 {% set previewConfig = {
-    fieldId: field.id ?? null,
-    entryId: element.id ?? null,
+    workflowHandle: field.workflowHandle ?? '',
+    elementId: element.id ?? null,
     siteId: element.siteId ?? null,
+    launcherKey: autofillLauncherKey,
     testMode: testMode ?? true,
-    promptPreviewActionUrl: actionUrl('autofill/prompt-preview/build-prompt'),
-    generateSuggestionsActionUrl: actionUrl('autofill/prompt-preview/generate-suggestions'),
-    responseNormalizeActionUrl: actionUrl('autofill/response-preview/normalize-response'),
-    applySuggestionActionUrl: actionUrl('autofill/response-preview/apply-suggestion'),
+    instanceId: autofillInstanceId,
+    promptPreviewActionUrl: actionUrl('autofill/workflow-run/preview'),
+    generateSuggestionsActionUrl: actionUrl('autofill/workflow-run/generate'),
+    responseNormalizeActionUrl: actionUrl('autofill/workflow-run/normalize'),
+    applySuggestionActionUrl: actionUrl('autofill/workflow-run/apply'),
     iconSvgActionUrl: actionUrl('app/icon-svg'),
 } %}
 {% set isTestMode = testMode ?? true %}
 {% set showUserPromptInput = field.showUserPromptInput ?? true %}
 {% set defaultActionLabel = isTestMode ? 'Generate' : 'Autofill' %}
 {% set actionButtonLabel = field.actionButtonLabel|trim ?: defaultActionLabel %}
-{% set autofillDomId = field.id ?? field.handle ?? 'autofill' %}
+{% set autofillDomId = autofillInstanceId %}
 {% set previewConfigJson = previewConfig|json_encode %}
+
+{% if sidebar ?? false %}
+    <h2 class="autofill-runtime__workflow-name">{{ field.name ?: field.workflowHandle ?: 'Autofill workflow' }}</h2>
+{% endif %}
 
 <div
     class="autofill-runtime"
     data-autofill-runtime
-    data-autofill-field-id="{{ field.id ?? '' }}"
+    data-autofill-instance-id="{{ autofillInstanceId }}"
     data-autofill-config="{{ previewConfigJson|e('html_attr') }}"
 >
     <div class="autofill-runtime__primary">
@@ -40,6 +49,7 @@
         <div class="buttons">
             <button type="button" class="btn submit" data-autofill-generate>{{ actionButtonLabel }}</button>
         </div>
+        <p class="autofill-runtime__status" data-autofill-run-status role="status" aria-live="polite" hidden></p>
     </div>
 
     {% if isTestMode %}
@@ -78,7 +88,7 @@
 </div>
 
 {% include 'autofill/fields/autofill/partials/_review-modal.twig' with {
-    modalFieldId: field.id ?? null,
+    modalInstanceId: autofillInstanceId,
 } only %}
 
 {% css %}
@@ -124,17 +134,26 @@
 }
 
 .autofill-review-modal {
-    position: fixed;
-    top: 96px;
-    left: 50%;
-    transform: translateX(-50%);
+    display: block;
+    color: #2f3a47;
+}
+
+.autofill-review-modal::backdrop {
+    background: transparent;
+}
+
+.autofill-review-modal::part(panel)::backdrop {
+    background: transparent;
+}
+
+.autofill-review-modal::part(panel) {
     width: min(720px, calc(100vw - 32px));
-    background: #fff;
-    border-radius: 12px;
-    border: 1px solid #d7dde5;
-    box-shadow: 0 22px 44px rgba(15, 23, 42, 0.14), 0 6px 16px rgba(15, 23, 42, 0.08);
-    z-index: 9999;
-    padding: 18px 18px 16px;
+    max-width: calc(100vw - 32px);
+    max-height: var(--autofill-review-max-height, calc(100vh - 48px));
+    inset: var(--autofill-review-top, 96px) 0 auto;
+    margin: 0 auto;
+    transform: none;
+    padding: 0;
 }
 
 .autofill-review-modal__header {
@@ -142,7 +161,7 @@
     align-items: baseline;
     justify-content: space-between;
     gap: 12px;
-    margin-bottom: 14px;
+    padding: 18px 20px 12px;
 }
 
 .autofill-review-modal__title {
@@ -164,6 +183,9 @@
 .autofill-review-modal__body {
     display: grid;
     gap: 10px;
+    max-height: calc(100vh - 210px);
+    overflow: auto;
+    padding: 8px 20px;
 }
 
 .autofill-review-modal__loading {
@@ -263,11 +285,16 @@
 }
 
 .autofill-review-modal--richtext {
-    width: min(980px, calc(100vw - 32px));
+    --autofill-review-width: min(980px, calc(100vw - 32px));
 }
 
 .autofill-review-modal--table {
-    width: min(1080px, calc(100vw - 32px));
+    --autofill-review-width: min(1080px, calc(100vw - 32px));
+}
+
+.autofill-review-modal--richtext::part(panel),
+.autofill-review-modal--table::part(panel) {
+    width: var(--autofill-review-width);
 }
 
 .autofill-review-modal--richtext [data-autofill-review-editor] textarea {
@@ -533,10 +560,10 @@
 }
 
 .autofill-review-modal__buttons {
-    margin-top: 14px;
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+    padding: 12px 20px 18px;
 }
 
 .autofill-review-modal__buttons [data-autofill-close] {

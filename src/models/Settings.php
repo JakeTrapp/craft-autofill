@@ -4,7 +4,7 @@ namespace jtdev\craftautofill\models;
 
 use craft\base\Model;
 use craft\helpers\StringHelper;
-use jtdev\craftautofill\models\ai\OpenAiConfig;
+use jtdev\craftautofill\models\ai\AiModelConfig;
 
 /**
  * Autofill settings
@@ -56,18 +56,27 @@ class Settings extends Model
             $provider = (string)($config['provider'] ?? 'openai');
             $rowLabel = sprintf('Model config row %d', $index + 1);
 
-            if ($provider !== 'openai') {
+            if (!in_array($provider, ['openai', 'anthropic', 'deepseek', 'gemini'], true)) {
                 $this->addError('modelConfigs', sprintf('%s has unsupported provider "%s".', $rowLabel, $provider));
                 continue;
             }
 
-            $openAiConfig = new OpenAiConfig($config);
-            if ($openAiConfig->validate()) {
+            $modelConfig = new AiModelConfig($config);
+            if (!$modelConfig->validate()) {
+                foreach ($modelConfig->getFirstErrors() as $attribute => $message) {
+                    $this->addError('modelConfigs', sprintf('%s (%s): %s', $rowLabel, $attribute, $message));
+                }
                 continue;
             }
 
-            foreach ($openAiConfig->getFirstErrors() as $attribute => $message) {
-                $this->addError('modelConfigs', sprintf('%s (%s): %s', $rowLabel, $attribute, $message));
+            $allowedEfforts = match ($provider) {
+                'openai' => ['', 'low', 'medium', 'high'],
+                'deepseek' => ['', 'none', 'low', 'high', 'max'],
+                default => [''],
+            };
+            $effort = strtolower(trim((string)($config['reasoningEffort'] ?? '')));
+            if (!in_array($effort, $allowedEfforts, true)) {
+                $this->addError('modelConfigs', sprintf('%s has unsupported reasoning effort "%s" for %s.', $rowLabel, $effort, $provider));
             }
         }
     }

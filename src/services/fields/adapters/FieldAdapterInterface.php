@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace jtdev\craftautofill\services\fields\adapters;
 
+use craft\base\ElementInterface;
 use craft\base\FieldInterface;
 use craft\elements\Entry;
 

@@ -13,6 +13,15 @@ class EntryTypeFieldResolverService extends Component
 {
     public function resolveForAutofillField(AutofillField $autofillField, string $fieldUid): ?FieldInterface
     {
+        if ($autofillField->volumeUid !== '') {
+            $volume = Craft::$app->getVolumes()->getVolumeByUid($autofillField->volumeUid);
+            foreach ($volume?->getFieldLayout()->getCustomFields() ?? [] as $field) {
+                if ($field->uid === $fieldUid || ($field->layoutElement->uid ?? null) === $fieldUid) {
+                    return $field;
+                }
+            }
+            return null;
+        }
         return $this->resolveByEntryTypeUid($autofillField->entryTypeUid, $fieldUid);
     }
 

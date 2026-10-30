@@ -3,22 +3,20 @@
     window.AutofillInputRuntime = window.AutofillInputRuntime || {};
     const runtime = window.AutofillInputRuntime;
 
-    runtime.createReviewModal = ({ applySuggestion, focusMatchedField, fieldId }) => {
+    runtime.createReviewModal = ({ applySuggestion, focusMatchedField, instanceId, fieldRoot = document }) => {
         let suggestions = [];
         let currentIndex = 0;
         let isLoading = false;
+        let wantsOpen = false;
         let spotlightAnchor = null;
         let spotlightFrame = null;
-        const normalizedFieldId = Number(fieldId || 0);
-        const fieldIdAttr = Number.isFinite(normalizedFieldId) && normalizedFieldId > 0
-            ? String(normalizedFieldId)
-            : '';
+        const instanceIdAttr = String(instanceId || '').trim();
 
         const byField = (selector) => {
-            if (fieldIdAttr === '') {
+            if (instanceIdAttr === '') {
                 return document.querySelector(selector);
             }
-            return document.querySelector(`${selector}[data-autofill-field-id="${fieldIdAttr}"]`);
+            return document.querySelector(`${selector}[data-autofill-instance-id="${instanceIdAttr}"]`);
         };
 
         const modalState = {
@@ -73,11 +71,27 @@
 
         hoistModalToBody();
 
+        if (modalState.modal instanceof HTMLElement) {
+            modalState.modal.addEventListener('pk-hide', (event) => {
+                if (isLoading) event.preventDefault();
+            });
+            modalState.modal.addEventListener('pk-open-change', (event) => {
+                if (event.detail?.open === false && wantsOpen && !isLoading) {
+                    wantsOpen = false;
+                    finishReview();
+                }
+            });
+        }
+
         const teardown = () => {
+            wantsOpen = false;
             if (modalState.backdrop instanceof HTMLElement) {
                 modalState.backdrop.hidden = true;
             }
             if (modalState.modal instanceof HTMLElement) {
+                if (typeof modalState.modal.hide === 'function') {
+                    modalState.modal.hide('api');
+                }
                 modalState.modal.hidden = true;
             }
             spotlightAnchor = null;
@@ -120,11 +134,19 @@
         };
 
         const show = () => {
+            wantsOpen = true;
             if (modalState.backdrop instanceof HTMLElement) {
                 modalState.backdrop.hidden = false;
             }
             if (modalState.modal instanceof HTMLElement) {
                 modalState.modal.hidden = false;
+                const openDialog = () => {
+                    if (wantsOpen && modalState.modal instanceof HTMLElement && !modalState.modal.hidden && typeof modalState.modal.show === 'function') {
+                        modalState.modal.show('api');
+                    }
+                };
+                if (typeof modalState.modal.show === 'function') openDialog();
+                else if (window.customElements?.whenDefined) window.customElements.whenDefined('pk-dialog').then(openDialog);
             }
         };
 
@@ -217,8 +239,8 @@
         };
 
         const showLoading = (message = 'Waiting for response from AI...') => {
-            show();
             setLoadingState(true, message);
+            show();
             if (modalState.status instanceof HTMLElement) {
                 modalState.status.textContent = '';
             }
@@ -251,8 +273,7 @@
                 setSpotlightForAnchor(anchor);
             }
             const availableHeight = Math.max(160, window.innerHeight - (viewportPadding * 2));
-            modalState.modal.style.maxHeight = `${availableHeight}px`;
-            modalState.modal.style.overflowY = 'auto';
+            modalState.modal.style.setProperty('--autofill-review-max-height', `${availableHeight}px`);
 
             const modalHeight = modalState.modal.offsetHeight || 320;
             const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
@@ -265,7 +286,7 @@
                 : rect.bottom + gap;
             const maxTop = window.innerHeight - modalHeight - viewportPadding;
             const computedTop = Math.max(viewportPadding, Math.min(idealTop, maxTop));
-            modalState.modal.style.top = `${computedTop}px`;
+            modalState.modal.style.setProperty('--autofill-review-top', `${computedTop}px`);
         };
 
         const renderCurrent = () => {
@@ -305,6 +326,7 @@
                 container: modalState.editor,
             });
             focusMatchedField(current.matchedHandle, {
+                root: fieldRoot,
                 positionReviewModal: positionBelowField,
             });
         };
@@ -409,8 +431,18 @@
             }
         };
 
+        const destroy = () => {
+            clear();
+            document.removeEventListener('click', handleDocumentClick);
+            window.removeEventListener('resize', queueSpotlightRefresh);
+            document.removeEventListener('scroll', queueSpotlightRefresh, true);
+            modalState.backdrop?.remove();
+            modalState.modal?.remove();
+        };
+
         return {
             clear,
+            destroy,
             handleDocumentClick,
             positionBelowField,
             setSuggestions,

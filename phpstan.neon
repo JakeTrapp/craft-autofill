@@ -2,6 +2,8 @@ includes:
     - vendor/craftcms/phpstan/phpstan.neon
 
 parameters:
+    excludePaths:
+        - src/web/assets/cp/frontend/node_modules/*
     level: 4
     paths:
         - src

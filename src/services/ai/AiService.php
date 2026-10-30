@@ -8,7 +8,10 @@ use craft\base\Component;
 use craft\base\Model;
 use jtdev\craftautofill\models\ai\AiGenerationRequest;
 use jtdev\craftautofill\models\ai\AiGenerationResult;
-use jtdev\craftautofill\models\ai\OpenAiConfig;
+use jtdev\craftautofill\models\ai\AiModelConfig;
+use jtdev\craftautofill\services\ai\providers\anthropic\AnthropicProvider;
+use jtdev\craftautofill\services\ai\providers\deepseek\DeepSeekProvider;
+use jtdev\craftautofill\services\ai\providers\gemini\GeminiProvider;
 use jtdev\craftautofill\services\ai\providers\openai\OpenAiProvider;
 use RuntimeException;
 
@@ -29,8 +32,10 @@ class AiService extends Component
         $this->promptBuilder ??= new PromptBuilder();
         $this->responseNormalizer ??= new AiResponseNormalizer();
 
-        if ($this->providers === []) {
-            $this->registerProvider(new OpenAiProvider());
+        foreach ([new OpenAiProvider(), new AnthropicProvider(), new DeepSeekProvider(), new GeminiProvider()] as $provider) {
+            if (!isset($this->providers[$provider->getProviderKey()])) {
+                $this->registerProvider($provider);
+            }
         }
     }
 
@@ -72,6 +77,15 @@ class AiService extends Component
         return $result['result'];
     }
 
+    /** Builds the provider-neutral settings model used by all request paths. */
+    public function createModelConfig(array $attributes): AiModelConfig
+    {
+        $provider = strtolower(trim((string)($attributes['provider'] ?? 'openai')));
+        $attributes['provider'] = $provider;
+
+        return new AiModelConfig($attributes);
+    }
+
     /**
      * @return array{result:AiGenerationResult,rawResponse:array}
      */
@@ -108,8 +122,8 @@ class AiService extends Component
 
     private function getProviderKeyForConfig(Model $providerConfig): string
     {
-        if ($providerConfig instanceof OpenAiConfig) {
-            return 'openai';
+        if ($providerConfig instanceof AiModelConfig) {
+            return strtolower($providerConfig->provider);
         }
 
         throw new RuntimeException(sprintf('Unsupported provider config class "%s".', $providerConfig::class));

@@ -34,6 +34,8 @@ class ResponsePreviewController extends Controller
                 ]);
             }
 
+            AutofillPlugin::getInstance()->getWorkflowRuntimeService()->authorizeField($fieldId, $entryId, $siteId);
+
             $result = AutofillPlugin::getInstance()->getAiService()->normalizeAutofillResponse(
                 (string)($body['rawResponse'] ?? ''),
                 $fieldId,
@@ -79,6 +81,8 @@ class ResponsePreviewController extends Controller
                     'error' => 'Autofill field ID was invalid.',
                 ]);
             }
+
+            AutofillPlugin::getInstance()->getWorkflowRuntimeService()->authorizeField($fieldId, $entryId, $siteId);
 
             $applied = AutofillPlugin::getInstance()
                 ->getEntrySuggestionApplyService()

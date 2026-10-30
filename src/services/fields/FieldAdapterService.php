@@ -46,6 +46,7 @@ class FieldAdapterService extends Component
 
         if ($this->adapters === []) {
             $this->registerAdapter(new PlainTextFieldAdapter());
+            $this->registerAdapter(new \jtdev\craftautofill\services\fields\adapters\AssetsFieldAdapter());
             $this->registerAdapter(new LightswitchFieldAdapter());
             $this->registerAdapter(new NumberFieldAdapter());
             $this->registerAdapter(new DateFieldAdapter());

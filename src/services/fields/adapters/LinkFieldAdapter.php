@@ -273,7 +273,7 @@ class LinkFieldAdapter implements FieldAdapterInterface
         return $normalized;
     }
 
-    public function applySuggestionToEntry(FieldInterface $field, Entry $entry, mixed $value): mixed
+    public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed
     {
         if (!$field instanceof LinkField) {
             throw new RuntimeException('Link suggestion adapter received an unsupported field.');

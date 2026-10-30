@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace jtdev\craftautofill\services\fields\adapters;
 
+use craft\base\ElementInterface;
 use craft\base\FieldInterface;
 use craft\elements\Entry;
 use craft\fields\Time;
@@ -130,7 +131,7 @@ class TimeFieldAdapter implements FieldAdapterInterface
         return $this->normalizeTimeString($value);
     }
 
-    public function applySuggestionToEntry(FieldInterface $field, Entry $entry, mixed $value): mixed
+    public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed
     {
         $normalized = $this->normalizeTimeString($value);
         $handle = (string)($field->handle ?? '');

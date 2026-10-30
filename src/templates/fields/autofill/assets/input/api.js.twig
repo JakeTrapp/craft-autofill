@@ -32,40 +32,40 @@
         return data;
     };
 
-    runtime.buildPromptPreview = async ({ endpoint, fieldId, userPrompt, entryId, siteId }) => {
+    runtime.buildPromptPreview = async ({ endpoint, workflowHandle, userPrompt, elementId, siteId }) => {
         const data = await postJson(
             endpoint,
-            { userPrompt, fieldId, entryId, siteId },
+            { userPrompt, workflowHandle, elementId, siteId },
             'Could not build prompt preview.',
         );
 
         return String(data.prompt || '');
     };
 
-    runtime.normalizeResponse = async ({ endpoint, fieldId, rawResponse, entryId, siteId }) => {
+    runtime.normalizeResponse = async ({ endpoint, workflowHandle, rawResponse, elementId, siteId }) => {
         const data = await postJson(
             endpoint,
-            { rawResponse, fieldId, entryId, siteId },
+            { rawResponse, workflowHandle, elementId, siteId },
             'Could not normalize response.',
         );
 
         return Array.isArray(data.suggestions) ? data.suggestions : [];
     };
 
-    runtime.generateSuggestions = async ({ endpoint, fieldId, userPrompt, entryId, siteId }) => {
+    runtime.generateSuggestions = async ({ endpoint, workflowHandle, userPrompt, elementId, siteId }) => {
         const data = await postJson(
             endpoint,
-            { userPrompt, fieldId, entryId, siteId },
+            { userPrompt, workflowHandle, elementId, siteId },
             'Could not generate suggestions.',
         );
 
         return Array.isArray(data.suggestions) ? data.suggestions : [];
     };
 
-    runtime.applySuggestionViaServer = async ({ endpoint, fieldId, entryId, siteId, suggestion }) => {
+    runtime.applySuggestionViaServer = async ({ endpoint, workflowHandle, elementId, siteId, suggestion }) => {
         const data = await postJson(
             endpoint,
-            { fieldId, entryId, siteId, suggestion },
+            { workflowHandle, elementId, siteId, suggestion },
             'Could not apply suggestion.',
         );
 

@@ -7,7 +7,7 @@ namespace jtdev\craftautofill\services\ai;
 use craft\base\Component;
 use craft\helpers\Json;
 use jtdev\craftautofill\models\ai\AiGenerationRequest;
-use jtdev\craftautofill\models\ai\OpenAiConfig;
+use jtdev\craftautofill\models\ai\AiModelConfig;
 
 class PromptBuilder extends Component
 {
@@ -18,6 +18,15 @@ class PromptBuilder extends Component
         parent::init();
 
         $this->fieldConfigBuilder ??= new AutofillFieldConfigBuilder();
+    }
+
+    public function buildForElementPrompt(string $userPrompt, \jtdev\craftautofill\fields\AutofillField $definition, \craft\base\ElementInterface $element): string
+    {
+        $builder = clone $this;
+        $builder->fieldConfigBuilder = clone $this->fieldConfigBuilder;
+        $builder->fieldConfigBuilder->definitionOverride = $definition;
+        $builder->fieldConfigBuilder->elementOverride = $element;
+        return $builder->buildAutofillPromptPreview($userPrompt, 0, (int)$element->id, $element->siteId);
     }
 
     public function buildAutofillPromptPreview(
@@ -117,7 +126,7 @@ class PromptBuilder extends Component
     public function buildGenerationRequest(
         string $sourceContent,
         string $instruction,
-        OpenAiConfig $config,
+        AiModelConfig $config,
         array $context = [],
         array $dependencyValues = [],
     ): AiGenerationRequest {

@@ -1,9 +1,9 @@
-{% set modalFieldAttr = modalFieldId is not empty ? (modalFieldId ~ '') : '' %}
+{% set modalInstanceAttr = modalInstanceId is not empty ? (modalInstanceId ~ '') : '' %}
 
-<div class="autofill-review-modal-backdrop" data-autofill-review-backdrop{% if modalFieldAttr != '' %} data-autofill-field-id="{{ modalFieldAttr }}"{% endif %} hidden></div>
+<div class="autofill-review-modal-backdrop" data-autofill-review-backdrop{% if modalInstanceAttr != '' %} data-autofill-instance-id="{{ modalInstanceAttr }}"{% endif %} hidden></div>
 
-<div class="autofill-review-modal" data-autofill-review-modal{% if modalFieldAttr != '' %} data-autofill-field-id="{{ modalFieldAttr }}"{% endif %} hidden>
-    <div class="autofill-review-modal__header">
+<pk-dialog class="autofill-review-modal" data-autofill-review-modal{% if modalInstanceAttr != '' %} data-autofill-instance-id="{{ modalInstanceAttr }}"{% endif %} size="wide" label="Suggestion Review" disable-pointer-dismissal hidden>
+    <div class="autofill-review-modal__header" slot="header">
         <h2 class="autofill-review-modal__title">Suggestion Review</h2>
         <p class="autofill-review-modal__counter" data-autofill-review-status></p>
     </div>
@@ -16,13 +16,13 @@
         <p class="autofill-review-modal__errors" data-autofill-review-errors hidden></p>
         <div data-autofill-review-editor></div>
     </div>
-    <div class="autofill-review-modal__buttons">
+    <div class="autofill-review-modal__buttons" slot="footer">
         <button type="button" class="btn submit" data-autofill-accept>Accept</button>
         <button type="button" class="btn" data-autofill-prev>Prev</button>
         <button type="button" class="btn" data-autofill-next>Next</button>
         <button type="button" class="btn" data-autofill-close>Close</button>
     </div>
-</div>
+</pk-dialog>
 
 <div data-autofill-review-templates hidden>
     <template data-autofill-review-template="textarea">

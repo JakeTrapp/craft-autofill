@@ -1,0 +1,12 @@
+{% extends '_layouts/cp.twig' %}
+{% set title = 'Workflows'|t('autofill') %}
+{% set selectedSubnavItem = 'workflows' %}
+{% do view.registerAssetBundle('jtdev\\craftautofill\\web\\assets\\cp\\AutofillCpAsset') %}
+{% set options = {
+    screen: 'list', workflows: workflows,
+    newUrl: url('autofill/workflows/new'), editBaseUrl: url('autofill/workflows/edit'),
+    deleteUrl: actionUrl('autofill/workflows/delete'),
+} %}
+{% block content %}
+    <div data-autofill-vue-root data-screen="list" data-options="{{ options|json_encode|e('html_attr') }}"></div>
+{% endblock %}

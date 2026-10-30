@@ -14,12 +14,14 @@ class RunAutofillEntryJob extends BaseJob
     public ?int $siteId = null;
     public string $userPrompt = '';
     public string $source = 'queue';
+    /** Null denotes trusted CLI work or a pre-user-context serialized job. */
+    public ?int $initiatingUserId = null;
 
     public function execute($queue): void
     {
         AutofillPlugin::getInstance()
             ->getBulkAutofillService()
-            ->runForEntry($this->fieldId, null, $this->entryId, $this->siteId, $this->userPrompt, $this->source);
+            ->runForEntry($this->fieldId, null, $this->entryId, $this->siteId, $this->userPrompt, $this->source, $this->initiatingUserId);
     }
 
     protected function defaultDescription(): ?string

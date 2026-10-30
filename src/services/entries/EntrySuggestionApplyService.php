@@ -34,6 +34,18 @@ class EntrySuggestionApplyService extends Component
             throw new RuntimeException(sprintf('Entry %d could not be found.', $entryId));
         }
 
+        AutofillPlugin::getInstance()->getWorkflowRuntimeService()->assertCanSave($entry);
+
+        if ($autofillField->workflowHandle !== '') {
+            $workflow = AutofillPlugin::getInstance()->getWorkflowService()->resolveForField($autofillField);
+            if ($workflow === null) {
+                throw new RuntimeException('This Autofill workflow is unavailable.');
+            }
+            $runtime = AutofillPlugin::getInstance()->getWorkflowRuntimeService();
+            $runtime->assertScope($workflow, $entry);
+            return $runtime->apply(AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow), $entry, $suggestion);
+        }
+
         $targetFieldUid = trim((string)($suggestion['targetFieldUid'] ?? ''));
         $matchedHandle = trim((string)($suggestion['matchedHandle'] ?? ''));
         $rawValue = $suggestion['value'] ?? null;
@@ -55,6 +67,21 @@ class EntrySuggestionApplyService extends Component
                 : null;
             if ($field === null) {
                 throw new RuntimeException(sprintf('Field UID "%s" could not be found.', $targetFieldUid));
+            }
+
+            $layoutElement = null;
+            foreach ($entry->getFieldLayout()?->getCustomFields() ?? [] as $layoutField) {
+                if (($layoutField->layoutElement->uid ?? $layoutField->uid) === $targetFieldUid) {
+                    $layoutElement = $layoutField->layoutElement;
+                    break;
+                }
+            }
+            if ($layoutElement === null) {
+                throw new RuntimeException('The output field is not part of this content layout.');
+            }
+            if (!Craft::$app->getRequest()->getIsConsoleRequest() &&
+                (!$layoutElement->showInForm($entry) || (method_exists($layoutElement, 'editable') && !$layoutElement->editable($entry)))) {
+                throw new RuntimeException('You cannot edit this output field.');
             }
 
             $adapter = AutofillPlugin::getInstance()->getFieldAdapterService()->getAdapterForField($field);

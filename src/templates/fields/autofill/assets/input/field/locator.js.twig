@@ -23,8 +23,8 @@
         return visibleEnabled || list[0] || null;
     };
 
-    const fieldContainerForHandle = (escapedHandle) => {
-        const fieldContainer = document.querySelector(
+    const fieldContainerForHandle = (escapedHandle, root = document) => {
+        const fieldContainer = root.querySelector(
             `[data-attribute="${escapedHandle}"], #fields-${escapedHandle}-field`
         );
 
@@ -59,11 +59,11 @@
         return null;
     };
 
-    runtime.findFieldInputByHandle = (handle) => {
+    runtime.findFieldInputByHandle = (handle, root = document) => {
         const escaped = escapeHandle(handle);
         const base = `[name="fields[${escaped}]"]`;
         const nestedBase = `[name^="fields[${escaped}]["]`;
-        const fieldContainer = fieldContainerForHandle(escaped);
+        const fieldContainer = fieldContainerForHandle(escaped, root);
         const nativeCandidates = [
             `textarea[name="${escaped}"]`,
             `select[name="${escaped}"]`,
@@ -79,14 +79,14 @@
         ];
 
         const primaryMatch = (
-            pickBest(document.querySelectorAll(`textarea${base}`)) ||
-            pickBest(document.querySelectorAll(`select${base}`)) ||
-            pickBest(document.querySelectorAll(`input[type="text"]${base}`)) ||
-            pickBest(document.querySelectorAll(`input[type="tel"]${base}`)) ||
-            pickBest(document.querySelectorAll(`input[type="number"]${base}`)) ||
-            pickBest(document.querySelectorAll(`input[type="checkbox"]${base}`)) ||
-            pickBest(document.querySelectorAll(`input${base}`)) ||
-            pickBest(document.querySelectorAll(nativeCandidates.join(', '))) ||
+            pickBest(root.querySelectorAll(`textarea${base}`)) ||
+            pickBest(root.querySelectorAll(`select${base}`)) ||
+            pickBest(root.querySelectorAll(`input[type="text"]${base}`)) ||
+            pickBest(root.querySelectorAll(`input[type="tel"]${base}`)) ||
+            pickBest(root.querySelectorAll(`input[type="number"]${base}`)) ||
+            pickBest(root.querySelectorAll(`input[type="checkbox"]${base}`)) ||
+            pickBest(root.querySelectorAll(`input${base}`)) ||
+            pickBest(root.querySelectorAll(nativeCandidates.join(', '))) ||
             null
         );
 
@@ -100,13 +100,13 @@
 
         // Fallback for fields that use nested names such as fields[handle][value].
         const nestedMatch = (
-            pickBest(document.querySelectorAll(`textarea${nestedBase}`)) ||
-            pickBest(document.querySelectorAll(`select${nestedBase}`)) ||
-            pickBest(document.querySelectorAll(`input[type="text"]${nestedBase}`)) ||
-            pickBest(document.querySelectorAll(`input[type="tel"]${nestedBase}`)) ||
-            pickBest(document.querySelectorAll(`input[type="number"]${nestedBase}`)) ||
-            pickBest(document.querySelectorAll(`input[type="checkbox"]${nestedBase}`)) ||
-            pickBest(document.querySelectorAll(`input${nestedBase}`)) ||
+            pickBest(root.querySelectorAll(`textarea${nestedBase}`)) ||
+            pickBest(root.querySelectorAll(`select${nestedBase}`)) ||
+            pickBest(root.querySelectorAll(`input[type="text"]${nestedBase}`)) ||
+            pickBest(root.querySelectorAll(`input[type="tel"]${nestedBase}`)) ||
+            pickBest(root.querySelectorAll(`input[type="number"]${nestedBase}`)) ||
+            pickBest(root.querySelectorAll(`input[type="checkbox"]${nestedBase}`)) ||
+            pickBest(root.querySelectorAll(`input${nestedBase}`)) ||
             null
         );
 
@@ -122,7 +122,7 @@
         return bestInputInFieldContainer(fieldContainer);
     };
 
-    runtime.findSplitDateTimeInputsByHandle = (handle) => {
+    runtime.findSplitDateTimeInputsByHandle = (handle, root = document) => {
         const escaped = escapeHandle(handle);
         const candidates = [
             {
@@ -136,8 +136,8 @@
         ];
 
         for (const pair of candidates) {
-            const dateInput = document.querySelector(pair.date);
-            const timeInput = document.querySelector(pair.time);
+            const dateInput = root.querySelector(pair.date);
+            const timeInput = root.querySelector(pair.time);
             if (dateInput instanceof HTMLInputElement || timeInput instanceof HTMLInputElement) {
                 return {
                     date: dateInput instanceof HTMLInputElement ? dateInput : null,
@@ -166,15 +166,15 @@
         );
     };
 
-    runtime.hasMeaningfulExistingValue = (handle) => {
-        const splitDateTime = runtime.findSplitDateTimeInputsByHandle(handle);
+    runtime.hasMeaningfulExistingValue = (handle, root = document) => {
+        const splitDateTime = runtime.findSplitDateTimeInputsByHandle(handle, root);
         if (splitDateTime.date || splitDateTime.time) {
             const dateValue = splitDateTime.date instanceof HTMLInputElement ? String(splitDateTime.date.value || '').trim() : '';
             const timeValue = splitDateTime.time instanceof HTMLInputElement ? String(splitDateTime.time.value || '').trim() : '';
             return dateValue !== '' || timeValue !== '';
         }
 
-        const input = runtime.findFieldInputByHandle(handle);
+        const input = runtime.findFieldInputByHandle(handle, root);
         if (!(input instanceof HTMLElement)) {
             return false;
         }

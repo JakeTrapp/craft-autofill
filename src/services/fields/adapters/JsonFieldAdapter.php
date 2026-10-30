@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace jtdev\craftautofill\services\fields\adapters;
 
+use craft\base\ElementInterface;
 use craft\base\FieldInterface;
 use craft\elements\Entry;
 use craft\fields\Json;
@@ -88,7 +89,7 @@ class JsonFieldAdapter implements FieldAdapterInterface
         return $this->normalizeJsonString($value);
     }
 
-    public function applySuggestionToEntry(FieldInterface $field, Entry $entry, mixed $value): mixed
+    public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed
     {
         $normalized = $this->normalizeJsonString($value);
         $handle = (string)($field->handle ?? '');

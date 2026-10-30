@@ -119,6 +119,23 @@ class FieldDiscoveryService extends Component
         return $meta;
     }
 
+    /** Asset workflows use the selected volume layout, not entry-type fields. */
+    public function getSupportedVolumeFields(\craft\models\Volume $volume): array
+    {
+        $fields = [
+            ['uid' => '__native__:title', 'handle' => 'title', 'name' => 'Title', 'type' => 'string', 'adapter' => 'plainText', 'availableInLiteVersion' => true],
+            ['uid' => '__native__:alt', 'handle' => 'alt', 'name' => 'Alt text', 'type' => 'string', 'adapter' => 'plainText', 'availableInLiteVersion' => true],
+            ['uid' => '__asset__:file', 'handle' => '__file', 'name' => 'This asset’s file', 'type' => 'file', 'adapter' => 'assets', 'availableInLiteVersion' => true, 'contextOnly' => true],
+        ];
+        foreach ($volume->getFieldLayout()->getCustomFields() as $field) {
+            $adapter = $this->fieldAdapterService->getAdapterForField($field);
+            if ($adapter !== null) {
+                $fields[] = $this->describeSupportedField($field, $adapter->getKey(), $adapter->isAvailableInLiteVersion());
+            }
+        }
+        return $fields;
+    }
+
     /**
      * @return array<string, array<string, mixed>>
      */

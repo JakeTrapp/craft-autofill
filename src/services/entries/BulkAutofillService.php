@@ -7,11 +7,13 @@ namespace jtdev\craftautofill\services\entries;
 use Craft;
 use craft\base\Component;
 use craft\elements\Entry;
+use craft\elements\User;
+use craft\fieldlayoutelements\CustomField;
 use craft\helpers\Json;
 use jtdev\craftautofill\AutofillPlugin;
 use jtdev\craftautofill\fields\AutofillField;
 use jtdev\craftautofill\jobs\RunAutofillEntryJob;
-use jtdev\craftautofill\models\ai\OpenAiConfig;
+use jtdev\craftautofill\models\ai\AiModelConfig;
 use RuntimeException;
 use Throwable;
 
@@ -52,7 +54,7 @@ class BulkAutofillService extends Component
         }
 
         foreach ($ids as $entryId) {
-            $result = $this->processEntry($resolvedFieldId, $entryId, $siteId, $modelConfig, $userPrompt, $source);
+            $result = $this->processEntry($resolvedFieldId, $entryId, $siteId, $modelConfig, $userPrompt, $source, $this->currentUserId());
             $entries[] = $result;
 
             if ($onEntryProcessed !== null) {
@@ -114,7 +116,7 @@ class BulkAutofillService extends Component
 
         foreach ($ids as $entryId) {
             try {
-                $jobId = $this->queueForEntry($resolvedFieldId, null, $entryId, $siteId, $userPrompt, $source);
+                $jobId = $this->queueForEntry($resolvedFieldId, null, $entryId, $siteId, $userPrompt, $source, $this->currentUserId());
                 $result = [
                     'entryId' => $entryId,
                     'queued' => true,
@@ -158,6 +160,7 @@ class BulkAutofillService extends Component
         ?int $siteId = null,
         string $userPrompt = '',
         string $source = 'queue',
+        ?int $initiatingUserId = null,
     ): mixed {
         if (!AutofillPlugin::getInstance()->isProEdition()) {
             throw new RuntimeException('Bulk Autofill is only available in Autofill Pro.');
@@ -168,6 +171,23 @@ class BulkAutofillService extends Component
         }
 
         $field = $this->resolveAutofillField($fieldId, $fieldSlug);
+        $initiatingUserId ??= $this->currentUserId();
+        $entry = Craft::$app->getElements()->getElementById($entryId, Entry::class, $siteId);
+        if (!$entry instanceof Entry) {
+            throw new RuntimeException(sprintf('Entry %d could not be found.', $entryId));
+        }
+        $user = $initiatingUserId !== null ? Craft::$app->getUsers()->getUserById($initiatingUserId) : null;
+        if ($initiatingUserId !== null && (!$user instanceof User || $user->getStatus() !== User::STATUS_ACTIVE)) {
+            throw new RuntimeException('The user who requested this Autofill job is no longer available.');
+        }
+        if (!Craft::$app->getRequest()->getIsConsoleRequest()) {
+            AutofillPlugin::getInstance()->getWorkflowRuntimeService()->authorizeField(
+                (int)$field->id,
+                (int)$entry->id,
+                $entry->siteId,
+            );
+        }
+        $this->authorizeEntryRun($field, $entry, $user);
 
         return Craft::$app->getQueue()->push(new RunAutofillEntryJob([
             'fieldId' => (int)$field->id,
@@ -175,6 +195,7 @@ class BulkAutofillService extends Component
             'siteId' => $siteId,
             'userPrompt' => $userPrompt,
             'source' => $source,
+            'initiatingUserId' => $initiatingUserId,
         ]));
     }
 
@@ -190,6 +211,7 @@ class BulkAutofillService extends Component
         ?int $siteId = null,
         string $userPrompt = '',
         string $source = 'api',
+        ?int $initiatingUserId = null,
     ): array {
         if (!AutofillPlugin::getInstance()->isProEdition()) {
             throw new RuntimeException('Bulk Autofill is only available in Autofill Pro.');
@@ -203,7 +225,8 @@ class BulkAutofillService extends Component
         $resolvedFieldId = (int)$field->id;
         $modelConfig = $this->resolveModelConfigForField($field);
 
-        return $this->processEntry($resolvedFieldId, $entryId, $siteId, $modelConfig, $userPrompt, $source);
+        $initiatingUserId ??= $this->currentUserId();
+        return $this->processEntry($resolvedFieldId, $entryId, $siteId, $modelConfig, $userPrompt, $source, $initiatingUserId);
     }
 
     /**
@@ -251,6 +274,17 @@ class BulkAutofillService extends Component
                 throw new RuntimeException(sprintf('Autofill field %d could not be found.', $fieldId));
             }
 
+            if ($field->workflowHandle !== '') {
+                $workflow = AutofillPlugin::getInstance()->getWorkflowService()->resolveForField($field);
+                if ($workflow === null) {
+                    throw new RuntimeException('This Autofill workflow is unavailable.');
+                }
+                $resolved = AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow);
+                $resolved->id = $field->id;
+                $resolved->uid = $field->uid;
+                $resolved->handle = $field->handle;
+                return $resolved;
+            }
             return $field;
         }
 
@@ -262,10 +296,21 @@ class BulkAutofillService extends Component
             ));
         }
 
+        if ($field->workflowHandle !== '') {
+            $workflow = AutofillPlugin::getInstance()->getWorkflowService()->resolveForField($field);
+            if ($workflow === null) {
+                throw new RuntimeException('This Autofill workflow is unavailable.');
+            }
+            $resolved = AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow);
+            $resolved->id = $field->id;
+            $resolved->uid = $field->uid;
+            $resolved->handle = $field->handle;
+            return $resolved;
+        }
         return $field;
     }
 
-    private function resolveModelConfigForField(AutofillField $field): OpenAiConfig
+    private function resolveModelConfigForField(AutofillField $field): AiModelConfig
     {
         $settings = AutofillPlugin::getInstance()->getSettings();
         $targetUid = trim($field->modelConfigUid);
@@ -285,6 +330,10 @@ class BulkAutofillService extends Component
             break;
         }
 
+        if ($chosen === null && $targetUid !== '') {
+            throw new RuntimeException('The selected AI model configuration is missing or disabled.');
+        }
+
         if ($chosen === null) {
             foreach ($settings->modelConfigs as $row) {
                 if (!is_array($row) || !($row['enabled'] ?? false)) {
@@ -300,7 +349,7 @@ class BulkAutofillService extends Component
             throw new RuntimeException('No enabled AI model configuration is available.');
         }
 
-        $modelConfig = new OpenAiConfig($chosen);
+        $modelConfig = AutofillPlugin::getInstance()->getAiService()->createModelConfig($chosen);
         if (!$modelConfig->validate()) {
             $message = implode(' ', array_values($modelConfig->getFirstErrors()));
             throw new RuntimeException($message !== '' ? $message : 'Selected AI model configuration is invalid.');
@@ -316,9 +365,10 @@ class BulkAutofillService extends Component
         int $fieldId,
         int $entryId,
         ?int $siteId,
-        OpenAiConfig $modelConfig,
+        AiModelConfig $modelConfig,
         string $userPrompt,
         string $source,
+        ?int $initiatingUserId = null,
     ): array {
         $startedAt = microtime(true);
         $logId = null;
@@ -330,6 +380,13 @@ class BulkAutofillService extends Component
                 throw new RuntimeException(sprintf('Entry %d could not be found.', $entryId));
             }
 
+            $user = $initiatingUserId !== null ? Craft::$app->getUsers()->getUserById($initiatingUserId) : null;
+            if ($initiatingUserId !== null && (!$user instanceof User || $user->getStatus() !== User::STATUS_ACTIVE)) {
+                throw new RuntimeException('The user who requested this Autofill job is no longer available.');
+            }
+            $definition = $this->resolveAutofillField($fieldId, null);
+            $this->authorizeEntryRun($definition, $entry, $user);
+
             $aiService = $plugin->getAiService();
             $instruction = $aiService->buildAutofillPromptPreview($userPrompt, $fieldId, $entryId, $siteId);
             $request = $aiService->promptBuilder->buildGenerationRequest(
@@ -339,12 +396,11 @@ class BulkAutofillService extends Component
                 ['fieldId' => $fieldId, 'entryId' => $entryId, 'source' => $source]
             );
 
-            $requestPayload = [
-                'model' => $modelConfig->modelId,
-                'reasoningEffort' => $modelConfig->reasoningEffort,
-                'messages' => $request->messages,
-                'context' => $request->context,
-            ];
+            $targetElement = Craft::$app->getElements()->getElementById($entryId, \craft\elements\Entry::class, $siteId);
+            if ($targetElement !== null) {
+                $request->fileInputs = (new \jtdev\craftautofill\services\assets\AssetInputService())->collect($definition, $targetElement, true, $user)['files'];
+            }
+            $requestPayload = $request->safeLogPayload();
 
             $logId = $plugin->getAiRequestLogService()->begin([
                 'fieldId' => $fieldId,
@@ -514,5 +570,83 @@ class BulkAutofillService extends Component
         }
 
         return (int)$value;
+    }
+
+    private function currentUserId(): ?int
+    {
+        if (Craft::$app->getRequest()->getIsConsoleRequest()) {
+            return null;
+        }
+
+        $userId = Craft::$app->getUser()->getId();
+        if (!$userId) {
+            throw new RuntimeException('You must be signed in to queue Autofill for content.');
+        }
+
+        return (int)$userId;
+    }
+
+    /** Authorize content scope, edit access, and selected asset context before any provider request. */
+    private function authorizeEntryRun(AutofillField $definition, Entry $entry, ?User $user): void
+    {
+        if ($definition->workflowHandle !== '') {
+            $workflow = AutofillPlugin::getInstance()->getWorkflowService()->getByHandle($definition->workflowHandle);
+            if ($workflow === null) {
+                throw new RuntimeException('This Autofill workflow is unavailable.');
+            }
+            AutofillPlugin::getInstance()->getWorkflowRuntimeService()->assertScope($workflow, $entry);
+        } elseif ($definition->entryTypeUid !== (string)$entry->getType()->uid) {
+            throw new RuntimeException('This workflow does not support this entry type.');
+        }
+
+        if ($user !== null && !Craft::$app->getElements()->canSave($entry, $user)) {
+            throw new RuntimeException('You do not have permission to change this content.');
+        }
+
+        (new \jtdev\craftautofill\services\assets\AssetInputService())->collect($definition, $entry, false, $user);
+
+        if ($user === null) {
+            return;
+        }
+
+        $layoutFields = [];
+        foreach ($entry->getFieldLayout()?->getCustomFields() ?? [] as $layoutField) {
+            $uid = (string)($layoutField->layoutElement->uid ?? $layoutField->uid ?? '');
+            $layoutFields[$uid] = $layoutField;
+        }
+        foreach ($definition->rows as $row) {
+            if (!is_array($row) || !($row['enabled'] ?? true)) {
+                continue;
+            }
+            $uid = trim((string)($row['targetFieldUid'] ?? ''));
+            if (str_starts_with($uid, '__native__:')) {
+                continue;
+            }
+            $layoutField = $layoutFields[$uid] ?? null;
+            $layoutElement = $layoutField?->layoutElement;
+            if ($layoutField === null || !$layoutElement instanceof CustomField) {
+                throw new RuntimeException('You cannot edit one of this workflow’s output fields.');
+            }
+            $userCondition = $layoutElement->getUserCondition();
+            if ($userCondition !== null && !$userCondition->matchElement($user)) {
+                throw new RuntimeException('You cannot edit one of this workflow’s output fields.');
+            }
+            $elementCondition = $layoutElement->getElementCondition();
+            if ($elementCondition !== null && !$elementCondition->matchElement($entry)) {
+                throw new RuntimeException('You cannot edit one of this workflow’s output fields.');
+            }
+            if (method_exists($layoutElement, 'getEditCondition')) {
+                $editCondition = $layoutElement->getEditCondition();
+                if ($editCondition !== null && !$editCondition->matchElement($user)) {
+                    throw new RuntimeException('You cannot edit one of this workflow’s output fields.');
+                }
+            }
+            if (method_exists($layoutElement, 'getElementEditCondition')) {
+                $elementEditCondition = $layoutElement->getElementEditCondition();
+                if ($elementEditCondition !== null && !$elementEditCondition->matchElement($entry)) {
+                    throw new RuntimeException('You cannot edit one of this workflow’s output fields.');
+                }
+            }
+        }
     }
 }
