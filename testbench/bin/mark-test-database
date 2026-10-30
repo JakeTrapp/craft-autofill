@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$repo_dir"
+testbench/bin/materialize
+ddev start
+ddev exec -d /var/www/html/testbench php bin/mark-test-database.php

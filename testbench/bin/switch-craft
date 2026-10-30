@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+version="${1:-}"
+if [[ -z "$version" ]]; then
+  printf '%s\n' 'Usage: testbench/bin/switch-craft latest|5.0.*|5.3.*|5.7.*|5.11.*' >&2
+  exit 1
+fi
+if [[ "$version" == "latest" ]]; then
+  version="^5.0"
+fi
+if [[ ! "$version" =~ ^(\^5\.0|5\.[0-9]+\.\*)$ ]]; then
+  printf '%s\n' 'Only Craft 5 constraints are accepted by this testbench.' >&2
+  exit 1
+fi
+
+project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$project_dir"
+ddev start
+ddev composer update "craftcms/cms:$version" --with-all-dependencies --no-interaction
+printf 'Craft is now pinned to %s in testbench/composer.lock. Run testbench/bin/test.\n' "$version"

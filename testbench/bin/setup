@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$repo_dir"
+
+testbench/bin/materialize
+ddev start
+ddev composer install --no-interaction
+
+if ! ddev exec -d /var/www/html/testbench php craft install/check >/dev/null 2>&1; then
+  printf '%s\n' 'The manual Craft site is not installed. Setup will not reset or replace its database.' >&2
+  printf '%s\n' 'Install Craft manually in the configured database, then rerun this command.' >&2
+  exit 1
+fi
+
+printf '%s\n' 'Craft testbench dependencies are ready.'
+printf '%s\n' 'The manual site database was left intact. Set AUTOFILL_TESTBENCH_SEED=1 to add sample content.'
+if [[ "${AUTOFILL_TESTBENCH_SEED:-0}" == "1" ]]; then
+  ddev exec -d /var/www/html/testbench php craft plugin/install autofill --interactive=0
+  ddev exec -d /var/www/html/testbench php craft autofill-testbench/seed
+fi

@@ -1,4 +1,12 @@
 # Release Notes for Autofill
+## Unreleased
+- Moved generation definitions into live-editable, administrator-managed workflows with handle-based field references and automatic conversion of existing configurations.
+- Added a Vue and Verbb Plugin Kit workflow editor and list, independent sidebar controls, and a Plugin Kit suggestion review dialog.
+- Required saving editor changes before generation so Autofill uses persisted content.
+- Added built-in Anthropic, DeepSeek, and Google Gemini model configurations alongside OpenAI.
+- Added asset-volume workflows, selected asset metadata and file inputs, configurable file counts, and clear unsupported-input errors. File content and temporary access links are excluded from request logs.
+- Added separate root unit, Craft integration, and Playwright browser suites, with a generated disposable Craft environment and release-package exclusions.
+
 ## 1.0.7 - 2026-07-27
 - Fixed a bug that cut off plain text fields value
 - Fixed change log

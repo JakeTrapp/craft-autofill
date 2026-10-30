@@ -1,0 +1,29 @@
+actor: Tester
+paths:
+  tests: tests
+  output: tests/_output
+  data: tests/_data
+  support: tests/_support
+  envs: tests/_envs
+bootstrap: _bootstrap.php
+params:
+  - tests/.env
+modules:
+  config:
+    \craft\test\Craft:
+      configFile: tests/_craft/config/test.php
+      entryUrl: https://craft-autofill-testbench.ddev.site/index.php
+      projectConfig: {}
+      migrations: []
+      plugins:
+        - class: jtdev\craftautofill\AutofillPlugin
+          handle: autofill
+        - class: craft\ckeditor\Plugin
+          handle: ckeditor
+        - class: nystudio107\seomatic\Seomatic
+          handle: seomatic
+      cleanup: true
+      transaction: true
+      dbSetup:
+        clean: true
+        setupCraft: true

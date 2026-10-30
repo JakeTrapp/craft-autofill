@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+runtime_dir="$repo_dir/testbench"
+recipe_dir="$repo_dir/tests/environment/testbench"
+
+mkdir -p "$runtime_dir"
+for item in bootstrap.php codeception.yml composer.json craft config modules templates web .env.example; do
+  if [[ -d "$recipe_dir/$item" ]]; then
+    mkdir -p "$runtime_dir/$item"
+    cp -R "$recipe_dir/$item/." "$runtime_dir/$item/"
+  else
+    cp "$recipe_dir/$item" "$runtime_dir/$item"
+  fi
+done
+chmod +x "$runtime_dir/craft"
+
+mkdir -p "$runtime_dir/tests"
+for item in _bootstrap.php _craft _support integration.suite.yml; do
+  if [[ -d "$recipe_dir/tests/$item" ]]; then
+    mkdir -p "$runtime_dir/tests/$item"
+    cp -R "$recipe_dir/tests/$item/." "$runtime_dir/tests/$item/"
+  else
+    cp "$recipe_dir/tests/$item" "$runtime_dir/tests/$item"
+  fi
+done
+# Remove generated files from the old Codeception unit suite. Unit tests now
+# run at the repository root without booting Craft.
+rm -rf "$runtime_dir/tests/unit"
+rm -f "$runtime_dir/tests/unit.suite.yml" "$runtime_dir/tests/_support/UnitTester.php" "$runtime_dir/tests/_support/Helper/Unit.php"
+cp "$recipe_dir/tests/test.env" "$runtime_dir/tests/.env"
+
+mkdir -p "$runtime_dir/bin"
+cp "$recipe_dir/bin/"*.php "$runtime_dir/bin/"
+
+rm -rf "$runtime_dir/tests/integration"
+mkdir -p "$runtime_dir/tests/integration" "$runtime_dir/tests/Support"
+cp "$repo_dir"/tests/integration/*.php "$runtime_dir/tests/integration/"
+cp "$repo_dir/tests/fixtures/Support/"*.php "$runtime_dir/tests/Support/"
+
+printf '%s\n' 'Generated the ignored Craft and Codeception files from tests/environment/testbench.'

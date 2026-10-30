@@ -12,6 +12,25 @@ package.json export-ignore
 phpstan.neon export-ignore
 stubs/ export-ignore
 tests/ export-ignore
+vendor/ export-ignore
+node_modules/ export-ignore
+.env export-ignore
+.env.* export-ignore
+jt-develop-docs/ export-ignore
+outline.txt export-ignore
+.DS_Store export-ignore
+src/web/assets/cp/frontend/ export-ignore
+testbench/ export-ignore
+.ddev/ export-ignore
+CRAFT-5-PLANNING.md export-ignore
+CRAFT-6-PLANNING.md export-ignore
+TESTING-PLANNING.md export-ignore
+TECHNICAL-PLAN.md export-ignore
+phpunit.xml.dist export-ignore
+playwright.config.ts export-ignore
+
+# Bundles contain significant whitespace inside generated template literals.
+src/web/assets/cp/dist/* -whitespace linguist-generated=true
 
 # Auto-detect text files and perform LF normalization
 * text=auto

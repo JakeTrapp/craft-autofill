@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+  printf '%s\n' 'Set OPENAI_API_KEY before running the live test.' >&2
+  exit 1
+fi
+
+project_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$project_dir"
+
+lock_dir="$project_dir/testbench/.test-run.lock"
+if ! mkdir "$lock_dir" 2>/dev/null; then
+  printf '%s\n' 'Another Autofill test suite owns db_test. Wait for it to finish before starting this suite.' >&2
+  exit 1
+fi
+printf 'live integration pid %s\n' "$$" > "$lock_dir/owner"
+trap 'rm -f "$lock_dir/owner"; rmdir "$lock_dir" 2>/dev/null || true' EXIT
+
+testbench/bin/materialize
+ddev start
+ddev composer install --no-interaction
+ddev exec -d /var/www/html/testbench php bin/create-test-database.php
+ddev exec -d /var/www/html/testbench vendor/bin/codecept build
+ddev exec -d /var/www/html/testbench -e AUTOFILL_RUN_LIVE_TESTS=1 -e OPENAI_API_KEY="$OPENAI_API_KEY" vendor/bin/codecept run integration --group live
