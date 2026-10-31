@@ -133,7 +133,19 @@ class AssetsFieldAdapter implements FieldAdapterInterface
         if (!is_array($ids)) {
             return false;
         }
-        return $field->maxRelations === null || count($ids) <= (int)$field->maxRelations;
+        if ($field->maxRelations !== null && count($ids) > (int)$field->maxRelations) {
+            return false;
+        }
+        $eligible = [];
+        foreach ($this->candidateAssets($field) as $asset) {
+            $eligible[(int)$asset->id] = true;
+        }
+        foreach ($ids as $id) {
+            if (!isset($eligible[$id])) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed

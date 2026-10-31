@@ -331,7 +331,7 @@ class TableFieldAdapter implements FieldAdapterInterface
         $staticRowCount = count($field->defaults ?? []);
 
         if ($field->staticRows && $staticRowCount > 0) {
-            $rows = array_slice(array_pad($rows, $staticRowCount, []), 0, $staticRowCount);
+            if (count($rows) !== $staticRowCount) return null;
         }
 
         $normalized = [];
@@ -343,12 +343,19 @@ class TableFieldAdapter implements FieldAdapterInterface
                 continue;
             }
 
+            $allowedKeys = ['rowId'];
+            foreach ($this->editableColumns($field) as $columnId => $column) {
+                $allowedKeys[] = $columnId;
+                $allowedKeys[] = $this->responseKeyForColumn($columnId, $column);
+            }
+            if (array_diff(array_keys($row), $allowedKeys) !== []) return null;
             $normalizedRow = $this->staticRowBase($field, $index);
 
             foreach ($this->editableColumns($field) as $columnId => $column) {
                 [$hasRawCellValue, $rawCellValue] = $this->findRawCellValue($row, $columnId, $column);
                 $cellValue = $this->normalizeCellValue($column, $rawCellValue, $hasRawCellValue);
 
+                if ($hasRawCellValue && $rawCellValue !== null && $rawCellValue !== '' && $cellValue === null) return null;
                 if ($cellValue === null || $cellValue === '') {
                     continue;
                 }
@@ -388,11 +395,11 @@ class TableFieldAdapter implements FieldAdapterInterface
         }
 
         if (isset($value['rows']) && is_array($value['rows'])) {
-            return array_values(array_filter($value['rows'], static fn(mixed $row) => is_array($row)));
+            return array_filter($value['rows'], static fn(mixed $row) => !is_array($row)) ? null : array_values($value['rows']);
         }
 
         if (array_is_list($value)) {
-            return array_values(array_filter($value, static fn(mixed $row) => is_array($row)));
+            return array_filter($value, static fn(mixed $row) => !is_array($row)) ? null : array_values($value);
         }
 
         if ($this->looksLikeRowObject($field, $value)) {
@@ -448,7 +455,9 @@ class TableFieldAdapter implements FieldAdapterInterface
 
     private function normalizeCellValue(array $column, mixed $value, bool $hasExplicitValue = true): mixed
     {
+        if (is_array($value) || is_object($value)) return null;
         $type = (string)($column['type'] ?? 'singleline');
+        if (in_array($type, ['checkbox', 'lightswitch'], true) && $hasExplicitValue && $value !== null && !in_array(strtolower(trim((string)$value)), ['', '0', '1', 'true', 'false', 'on', 'off', 'yes', 'no'], true)) return null;
 
         return match ($type) {
             'checkbox', 'lightswitch' => $this->normalizeBooleanCellValue($column, $value, $hasExplicitValue),
@@ -497,48 +506,24 @@ class TableFieldAdapter implements FieldAdapterInterface
 
     private function normalizeDate(mixed $value): ?string
     {
-        $raw = trim((string)$value);
-        if ($raw === '') {
-            return null;
-        }
-
-        $timestamp = strtotime($raw);
-        if ($timestamp === false) {
-            return null;
-        }
-
-        return date('Y-m-d', $timestamp);
+        if (!is_string($value) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', trim($value), $parts)) return null;
+        return checkdate((int)$parts[2], (int)$parts[3], (int)$parts[1]) ? trim($value) : null;
     }
 
     private function normalizeTime(mixed $value): ?string
     {
-        $raw = trim((string)$value);
-        if ($raw === '') {
-            return null;
-        }
-
+        if (!is_string($value) || !preg_match('/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/', trim($value))) return null;
+        $raw = trim($value);
         $date = DateTimeHelper::toDateTime(['time' => $raw], true);
         return $date ? $date->format('H:i:s') : null;
     }
 
     private function normalizeNumber(mixed $value): float|int|null
     {
-        if (is_int($value) || is_float($value)) {
-            return $value;
-        }
-
-        $raw = trim((string)$value);
-        if ($raw === '') {
-            return null;
-        }
-
-        $cleaned = preg_replace('/[^\d.+-]/', '', str_replace([',', ' '], '', $raw));
-        if ($cleaned === null || $cleaned === '' || !is_numeric($cleaned)) {
-            return null;
-        }
-
-        $number = (float)$cleaned;
-        return floor($number) === $number ? (int)$number : $number;
+        if (!is_scalar($value) || is_bool($value) || !is_numeric($value)) return null;
+        $number = (float)$value;
+        if (!is_finite($number)) return null;
+        return floor($number) === $number && abs($number) < PHP_INT_MAX ? (int)$number : $number;
     }
 
     private function normalizeSelectValue(array $column, mixed $value): ?string

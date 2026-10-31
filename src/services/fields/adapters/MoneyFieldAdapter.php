@@ -183,9 +183,21 @@ class MoneyFieldAdapter implements FieldAdapterInterface
             }
         }
 
+        if (!is_string($value) && !is_int($value) && !is_float($value)) {
+            return '';
+        }
+
         $raw = trim((string)$value);
         if ($raw === '') {
             return '';
+        }
+
+        if (preg_match('/^-?\d+(?:\.(\d+))?$/', $raw, $match) === 1) {
+            $fraction = (string)($match[1] ?? '');
+            $extraFraction = substr($fraction, max(0, $field->subunits()));
+            if (trim($extraFraction, '0') !== '') {
+                return '';
+            }
         }
 
         $money = $this->toMoney($field, $raw);
@@ -194,10 +206,14 @@ class MoneyFieldAdapter implements FieldAdapterInterface
 
     private function toMoney(Money $field, string $value): MoneyLibrary|false
     {
-        return MoneyHelper::toMoney([
-            'value' => $value,
-            'currency' => $field->currency,
-        ]);
+        try {
+            return MoneyHelper::toMoney([
+                'value' => $value,
+                'currency' => $field->currency,
+            ]);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     private function decimalFromMinorUnits(int|float|null $value, string $currency): ?string

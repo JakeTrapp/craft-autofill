@@ -101,13 +101,24 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
 
     public function validateSuggestion(FieldInterface $field, mixed $value): bool
     {
-        $decoded = $this->toArray($value);
-        if (array_key_exists('selectedTitles', $decoded) && is_array($decoded['selectedTitles'])) {
-            return true;
+        $rawTitles = $this->rawSuggestedTitles($value);
+        if ($rawTitles === null) {
+            return false;
         }
-
+        foreach ($rawTitles as $title) {
+            if (!is_string($title) || trim($title) === '') {
+                return false;
+            }
+        }
         $titles = $this->normalizeSuggestion($field, $value);
-        return is_array($titles);
+        if (!is_array($titles)) {
+            return false;
+        }
+        $max = $this->maxSelections($field);
+        if ($max !== null && count($titles) > $max) {
+            return false;
+        }
+        return count($this->matchTitlesToIds($field, $titles)) === count($titles);
     }
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
@@ -129,10 +140,11 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
 
     public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed
     {
-        $titles = $this->normalizeSuggestion($field, $value);
-        if (!is_array($titles)) {
-            $titles = [];
+        if (!$this->validateSuggestion($field, $value)) {
+            throw new \RuntimeException(sprintf('The %s suggestion contains invalid, unavailable, or ambiguous selections.', $this->displayTypeName()));
         }
+        $titles = $this->normalizeSuggestion($field, $value);
+        /** @var string[] $titles */
 
         $matchedIds = $this->matchTitlesToIds($field, $titles);
         $handle = (string)($field->handle ?? '');
@@ -305,7 +317,6 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
         }
 
         $idsByLowerTitle = [];
-        $allIds = [];
         foreach ($elements as $element) {
             if (!$element instanceof ElementInterface) {
                 continue;
@@ -319,12 +330,8 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
                 $id = (int)$element->id;
                 $idsByLowerTitle[$key] ??= [];
                 $idsByLowerTitle[$key][] = $id;
-                $allIds[] = $id;
             }
         }
-
-        $allIds = array_values(array_unique($allIds));
-        $countsById = $this->relationCountsByTargetId($field, $allIds);
 
         $matched = [];
         foreach ($titles as $title) {
@@ -333,26 +340,16 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
                 continue;
             }
             $candidateIds = array_values(array_unique($idsByLowerTitle[$key]));
-
-            usort($candidateIds, static function(int $a, int $b) use ($countsById): int {
-                $countA = (int)($countsById[$a] ?? 0);
-                $countB = (int)($countsById[$b] ?? 0);
-                if ($countA !== $countB) {
-                    return $countB <=> $countA;
-                }
-
-                return $a <=> $b;
-            });
+            // A title does not uniquely identify a target when the field's
+            // source contains duplicates. Never guess which element was meant.
+            if (count($candidateIds) !== 1) {
+                continue;
+            }
 
             $id = $candidateIds[0];
             if (!in_array($id, $matched, true)) {
                 $matched[] = $id;
             }
-        }
-
-        $maxSelections = $this->maxSelections($field);
-        if ($maxSelections !== null && $maxSelections > 0 && count($matched) > $maxSelections) {
-            $matched = array_slice($matched, 0, $maxSelections);
         }
 
         return $matched;
@@ -443,6 +440,26 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
         }
 
         return [];
+    }
+
+    /** @return array<int,mixed>|null */
+    private function rawSuggestedTitles(mixed $value): ?array
+    {
+        if (is_string($value)) {
+            $decoded = json_decode(trim($value), true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $value = $decoded;
+            } else {
+                return $value === '' ? [] : array_values(array_filter(array_map('trim', preg_split('/[\r\n,]+/', $value) ?: []), static fn($v) => $v !== ''));
+            }
+        }
+        if (!is_array($value)) {
+            return null;
+        }
+        if (array_key_exists('selectedTitles', $value)) {
+            return is_array($value['selectedTitles']) && array_is_list($value['selectedTitles']) ? $value['selectedTitles'] : null;
+        }
+        return array_is_list($value) ? $value : null;
     }
 
     /**

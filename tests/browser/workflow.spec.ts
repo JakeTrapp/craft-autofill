@@ -35,6 +35,20 @@ async function login(page: import('@playwright/test').Page, data: BrowserFixture
   await expect(page).not.toHaveURL(/\/admin\/login(?:\/|$)/);
 }
 
+async function addWorkflowField(page: import('@playwright/test').Page, kind: 'context' | 'output', name: string) {
+  const section = page.locator(kind === 'context' ? '#workflow-source' : '#workflow-outputs');
+  const count = await section.locator('.af-sort-item').count();
+  await section.getByRole('button', { name: 'Add field', exact: true }).click();
+  const picker = page.getByRole('dialog', { name: kind === 'context' ? 'Add context field' : 'Add output field' });
+  await expect(picker).toBeVisible();
+  await expect(section.locator('.af-sort-item')).toHaveCount(count);
+  await picker.getByRole('searchbox', { name: 'Search fields' }).fill(name);
+  const heading = page.getByRole('heading', { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?: · Pro)?$`) });
+  await picker.getByRole('button').filter({ has: heading }).click();
+  await expect(picker).toBeHidden();
+  await expect(section.locator('.af-sort-item')).toHaveCount(count + 1);
+}
+
 test('create workflow, configure field, generate, review, and persist', async ({ page }) => {
   const data = fixture();
   const runSuffix = Date.now().toString(36);
@@ -46,29 +60,23 @@ test('create workflow, configure field, generate, review, and persist', async ({
   await page.goto('/admin/autofill/workflows/new');
   await expect(page.getByRole('heading', { name: 'New workflow', exact: true })).toBeVisible();
   await page.getByLabel('Name', { exact: true }).fill('Browser review workflow');
+  await page.locator('#workflow-basics > .af-advanced > summary').click();
   await page.getByLabel('Handle', { exact: true }).fill(workflowHandle);
   await page.getByRole('combobox', { name: 'Entry type' }).selectOption(data.entryTypeUid);
-  const outputCard = page.locator('.af-card').filter({ has: page.getByRole('heading', { name: 'Output fields', exact: true }) });
   const outputFields = [{ name: 'Browser generated summary', handle: data.targetFieldHandle }, ...data.outputFields];
-  for (let index = 0; index < outputFields.length; index++) {
-    if (index > 0) await outputCard.getByRole('button', { name: 'Add output field' }).click();
-    const target = page.getByRole('combobox', { name: 'Target field' }).nth(index);
-    await expect.poll(async () => (await target.locator('option').allTextContents()).some(label => label.includes(outputFields[index].name))).toBe(true);
-    const optionLabels = await target.locator('option').allTextContents();
-    const optionIndex = optionLabels.findIndex(label => label.includes(outputFields[index].name));
-    const option = optionIndex >= 0 ? await target.locator('option').nth(optionIndex).getAttribute('value') : null;
-    if (!option) throw new Error(`Target field "${outputFields[index].name}" was not available in the workflow editor.`);
-    await target.selectOption(option);
-    await page.getByLabel('Prompt', { exact: true }).nth(index).fill(`Generate a valid ${outputFields[index].name} value.`);
+  for (const field of outputFields) {
+    await addWorkflowField(page, 'output', field.name);
+    await page.locator('#workflow-outputs .af-output').last().getByRole('textbox', { name: 'Instructions', exact: true }).fill(`Generate a valid ${field.name} value.`);
   }
+  await page.locator('#workflow-placement > summary').click();
   await page.getByLabel('Action button label', { exact: true }).fill('Generate test summary');
   const showOnSidebar = page.getByRole('checkbox', { name: 'Show this workflow in the entry sidebar' });
   await showOnSidebar.locator('..').click();
   await expect(showOnSidebar).toBeChecked();
-  await page.getByRole('button', { name: 'Add output field' }).waitFor();
-  await page.getByRole('button', { name: 'Save workflow' }).click();
-  await expect(page.locator('[data-autofill-vue-root]').getByRole('status')).toContainText('Workflow saved.');
+  await page.locator('#header').getByRole('button', { name: 'Save workflow' }).click();
+  await expect(page.getByText('Workflow saved.', { exact: true })).toBeVisible();
   await page.goto(`/admin/autofill/workflows/edit/${workflowHandle}`);
+  await page.locator('#workflow-placement > summary').click();
   await expect(page.getByRole('checkbox', { name: 'Show this workflow in the entry sidebar' })).toBeChecked();
 
   const fieldType = encodeURIComponent('jtdev\\craftautofill\\fields\\AutofillField');
@@ -264,4 +272,109 @@ test('non-admin entry editor cannot open workflow management', async ({ page }) 
   await page.goto(data.editorPath);
   const response = await page.goto('/admin/autofill/workflows');
   expect(response?.status()).toBe(403);
+});
+
+
+test('field picker blocks duplicates across panels and supports keyboard reordering', async ({ page }) => {
+  const data = fixture();
+  await login(page, data);
+  await page.goto('/admin/autofill/workflows/new');
+  await page.getByRole('combobox', { name: 'Entry type' }).selectOption(data.entryTypeUid);
+  await addWorkflowField(page, 'context', 'Title');
+
+  const outputs = page.locator('#workflow-outputs');
+  await outputs.getByRole('button', { name: 'Add field', exact: true }).click();
+  const picker = page.getByRole('dialog', { name: 'Add output field' });
+  await picker.getByRole('searchbox', { name: 'Search fields' }).fill('Title');
+  await expect(picker.getByRole('button', { name: 'Title Already in context', exact: true })).toBeDisabled();
+  await picker.getByRole('searchbox').press('Escape');
+  await expect(picker).toBeHidden();
+  await expect(outputs.locator('.af-sort-item')).toHaveCount(0);
+
+  await addWorkflowField(page, 'output', 'Browser generated summary');
+  await expect(outputs.getByRole('textbox', { name: 'Instructions', exact: true })).toBeFocused();
+  await expect(outputs.getByText('Needs instructions', { exact: true })).toBeVisible();
+  await outputs.getByRole('textbox', { name: 'Instructions', exact: true }).fill('Write a short summary.');
+  await expect(outputs.getByText('Needs instructions', { exact: true })).toHaveCount(0);
+  await addWorkflowField(page, 'output', 'Browser enabled');
+  await outputs.locator('.af-output').last().getByRole('textbox', { name: 'Instructions', exact: true }).fill('Set the state.');
+  await outputs.getByRole('button', { name: 'Reorder output field 2', exact: true }).press('ArrowUp');
+  await expect(outputs.locator('.af-output-summary').first()).toContainText('Browser enabled');
+  await expect(outputs.getByRole('combobox', { name: 'Field', exact: true })).toHaveCount(0);
+
+  await page.locator('#workflow-source').getByRole('button', { name: 'Add field', exact: true }).click();
+  const contextPicker = page.getByRole('dialog', { name: 'Add context field' });
+  await contextPicker.getByRole('searchbox').fill('Browser generated summary');
+  await expect(contextPicker.getByRole('button', { name: 'Browser generated summary Already in outputs', exact: true })).toBeDisabled();
+  await contextPicker.getByRole('searchbox').press('Escape');
+  await expect(outputs.locator('.af-output[open]')).toHaveCount(0);
+});
+
+test('Autofill sidebar stays expanded on each management page', async ({ page }) => {
+  await login(page, fixture());
+  await page.goto('/admin/autofill');
+  await expect(page).toHaveURL(/\/admin\/autofill\/workflows$/);
+  for (const name of ['Bulk Autofill', 'Logs', 'Workflows']) {
+    await page.getByRole('link', { name, exact: true }).click();
+    const subnav = page.locator('#nav-autofill-subnav');
+    await expect(subnav).toHaveAttribute('data-state', 'expanded');
+    await expect(subnav.locator('[aria-current="page"]')).toHaveText(name);
+  }
+});
+
+test('mixed invalid results can be corrected or skipped without losing valid suggestions', async ({ page }) => {
+  const data = fixture();
+  await login(page, data);
+  await page.goto('/admin/autofill/workflows/new');
+  await page.getByLabel('Name', { exact: true }).fill(`Edge review ${Date.now()}`);
+  await page.getByRole('combobox', { name: 'Entry type' }).selectOption(data.entryTypeUid);
+  for (const name of ['Browser generated summary', 'Browser status', 'Browser table']) {
+    await addWorkflowField(page, 'output', name);
+    await page.locator('#workflow-outputs .af-output').last().getByRole('textbox', { name: 'Instructions', exact: true }).fill(`Generate ${name}.`);
+  }
+  await page.locator('#workflow-placement > summary').click();
+  await page.getByLabel('Action button label', { exact: true }).fill('Review edge cases');
+  await page.getByRole('checkbox', { name: 'Show this workflow in the entry sidebar' }).locator('..').click();
+  await page.locator('#header').getByRole('button', { name: 'Save workflow' }).click();
+  await expect(page.getByText('Workflow saved.', { exact: true })).toBeVisible();
+  await page.goto(data.editorPath);
+  const runtime = page.locator('[data-autofill-runtime]').filter({ hasText: 'Review edge cases' }).first();
+  const config = JSON.parse((await runtime.getAttribute('data-autofill-config')) ?? '{}');
+  await page.route(config.generateSuggestionsActionUrl, async route => {
+    const request = route.request();
+    const response = await page.request.post(config.responseNormalizeActionUrl, {
+      headers: { Accept: 'application/json', 'X-CSRF-Token': request.headers()['x-csrf-token'] ?? '' },
+      data: { ...request.postDataJSON(), rawResponse: JSON.stringify([
+        { fieldName: 'Browser generated summary', value: { unexpected: 'A text field cannot store this object' } },
+        { fieldName: 'Browser status', value: 'ready' },
+        { fieldName: 'Browser table', value: { rows: [{ label: 'Bad numeric cell', amount: 'not a number' }] } },
+      ]) },
+    });
+    expect(response.ok(), `Normalization response status ${response.status()}`).toBe(true);
+    return route.fulfill({ response });
+  });
+  await runtime.locator('[data-autofill-generate]').click();
+  const modal = page.locator('[data-autofill-review-modal]:not([hidden])');
+  await expect(modal).toHaveCount(1);
+  await expect(modal.locator('[data-autofill-review-errors]')).toContainText('not valid');
+  await expect(modal.locator('[data-autofill-review-raw-value]')).toContainText('unexpected');
+  await expect(modal.locator('[data-autofill-accept]')).toBeDisabled();
+  await page.screenshot({ path: 'tests/browser/artifacts/review-invalid-editable.png', fullPage: true });
+  await modal.locator('[data-autofill-review-editor] textarea').fill('Editor corrected this summary.');
+  await expect(modal.locator('[data-autofill-accept]')).toHaveText('Check & apply');
+  await modal.locator('[data-autofill-accept]').click();
+  await expect(modal.locator('[data-autofill-review-field]')).toContainText('Browser status');
+  await expect(modal.locator('[data-autofill-accept]')).toBeEnabled();
+  await page.screenshot({ path: 'tests/browser/artifacts/review-valid-sibling.png', fullPage: true });
+  await modal.locator('[data-autofill-accept]').click();
+  await expect(modal.locator('[data-autofill-review-field]')).toContainText('Browser table');
+  await expect(modal.locator('[data-autofill-review-errors]')).toContainText('read-only');
+  await expect(modal.locator('[data-autofill-review-raw-value]')).toContainText('not a number');
+  await expect(modal.locator('[data-autofill-accept]')).toBeDisabled();
+  await expect(modal.locator('[data-autofill-review-editor] textarea, [data-autofill-review-editor] input')).toHaveCount(0);
+  await page.screenshot({ path: 'tests/browser/artifacts/review-invalid-readonly.png', fullPage: true });
+  await modal.locator('[data-autofill-close]').click();
+  await expect(page.locator(`[name="fields[${data.targetFieldHandle}]"]`).first()).toHaveValue('Editor corrected this summary.');
+  const dropdown = data.outputFields.find(field => field.name === 'Browser status')!;
+  await expect(page.locator(`select[name="fields[${dropdown.handle}]"]`)).toHaveValue('base64:cmVhZHk=');
 });

@@ -46,7 +46,7 @@ class OptionFieldValueHelper
     public static function normalizeSingleValue(mixed $value, array $options): string
     {
         $values = self::normalizeMultiValue($value, $options);
-        return $values[0] ?? '';
+        return count($values) === 1 ? $values[0] : '';
     }
 
     /**
@@ -65,6 +65,22 @@ class OptionFieldValueHelper
         }
 
         return $normalized;
+    }
+
+    /**
+     * Resolve a single candidate only when it identifies one option.
+     * Unknown or ambiguous labels are kept intact so validation can reject
+     * them instead of silently selecting or dropping a value.
+     * @param array<int, array{value:string, label:string}> $options
+     */
+    public static function normalizeSingleCandidate(mixed $value, array $options): string
+    {
+        if (!is_scalar($value) && !(is_object($value) && method_exists($value, '__toString'))) {
+            return '';
+        }
+
+        $raw = trim((string)$value);
+        return $raw === '' ? '' : self::resolveOptionValue($raw, $options);
     }
 
     /**
@@ -162,11 +178,22 @@ class OptionFieldValueHelper
 
         foreach ($options as $option) {
             $optionValue = trim((string)($option['value'] ?? ''));
-            $optionLabel = trim((string)($option['label'] ?? ''));
-
-            if ($raw === $optionValue || strcasecmp($raw, $optionLabel) === 0) {
+            if ($raw === $optionValue) {
                 return $optionValue;
             }
+        }
+
+        $labelMatches = [];
+        foreach ($options as $option) {
+            $optionValue = trim((string)($option['value'] ?? ''));
+            $optionLabel = trim((string)($option['label'] ?? ''));
+            if ($optionValue !== '' && strcasecmp($raw, $optionLabel) === 0) {
+                $labelMatches[$optionValue] = true;
+            }
+        }
+
+        if (count($labelMatches) === 1) {
+            return (string)array_key_first($labelMatches);
         }
 
         return $raw;

@@ -78,7 +78,7 @@ class PlainTextFieldAdapter implements FieldAdapterInterface
         }
 
         if (is_scalar($value)) {
-            return trim((string)$value);
+            return $this->stringifyScalar($value);
         }
 
         return '';
@@ -86,7 +86,16 @@ class PlainTextFieldAdapter implements FieldAdapterInterface
 
     public function validateSuggestion(FieldInterface $field, mixed $value): bool
     {
-        return is_string($value);
+        if (!$field instanceof PlainText || !is_scalar($value)) {
+            return false;
+        }
+
+        $text = $this->normalizeSuggestion($field, $value);
+        if ($field->charLimit !== null && mb_strlen($text, 'UTF-8') > $field->charLimit) {
+            return false;
+        }
+
+        return $field->byteLimit === null || strlen($text) <= $field->byteLimit;
     }
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
@@ -96,10 +105,19 @@ class PlainTextFieldAdapter implements FieldAdapterInterface
         }
 
         if (is_scalar($value)) {
-            return trim((string)$value);
+            return $this->stringifyScalar($value);
         }
 
         return '';
+    }
+
+    private function stringifyScalar(bool|int|float|string $value): string
+    {
+        if (is_bool($value)) {
+            return $value ? 'true' : 'false';
+        }
+
+        return trim((string)$value);
     }
 
     public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed

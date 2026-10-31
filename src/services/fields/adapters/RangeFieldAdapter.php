@@ -106,7 +106,7 @@ class RangeFieldAdapter implements FieldAdapterInterface
         }
 
         $normalized = $this->normalizeSuggestion($field, $value);
-        if (!is_numeric($normalized)) {
+        if (!is_numeric($normalized) || !is_finite((float)$normalized)) {
             return false;
         }
 
@@ -128,12 +128,16 @@ class RangeFieldAdapter implements FieldAdapterInterface
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
     {
-        if (is_numeric($value)) {
+        if (is_numeric($value) && is_finite((float)$value)) {
             return $this->normalizeNumericValue((float)$value);
         }
 
+        if (!is_string($value) && !is_int($value) && !is_float($value)) {
+            return null;
+        }
+
         $raw = trim((string)$value);
-        if ($raw === '' || !is_numeric($raw)) {
+        if ($raw === '' || !is_numeric($raw) || !is_finite((float)$raw)) {
             return null;
         }
 

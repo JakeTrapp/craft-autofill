@@ -30,6 +30,7 @@ class AiModelConfig extends Model
 
     public function getParsedApiKey(): string
     {
-        return trim(App::parseEnv($this->apiKeyEnv));
+        $value = App::parseEnv($this->apiKeyEnv);
+        return is_string($value) ? trim($value) : '';
     }
 }

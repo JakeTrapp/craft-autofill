@@ -8,21 +8,11 @@
         const reviewRequired = [];
 
         for (const item of suggestions) {
-            if (item.matchedHandle && item.overrideCurrentValue === false && runtime.hasMeaningfulExistingValue(item.matchedHandle, fieldRoot)) {
-                continue;
-            }
-
-            const normalizedValue = String(item.value ?? '').trim();
-            const missingNullOrEmptyValue = !item.hasRawValue || item.valueIsNull || normalizedValue === '';
-
-            if (item.matchedHandle && item.requiresApproval === false && missingNullOrEmptyValue && runtime.hasMeaningfulExistingValue(item.matchedHandle, fieldRoot)) {
-                continue;
-            }
-
             if (Array.isArray(item.validationErrors) && item.validationErrors.length) {
                 reviewRequired.push(item);
                 continue;
             }
+            if (item.matchedHandle && item.overrideCurrentValue === false && runtime.hasMeaningfulExistingValue(item.matchedHandle, fieldRoot)) continue;
 
             if (item.matchedHandle && item.requiresApproval === false) {
                 try {

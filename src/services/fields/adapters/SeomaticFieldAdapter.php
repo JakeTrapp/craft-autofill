@@ -138,8 +138,12 @@ class SeomaticFieldAdapter implements FieldAdapterInterface
 
     public function validateSuggestion(FieldInterface $field, mixed $value): bool
     {
-        $normalized = $this->normalizeSeoPatch($value);
-        return $normalized !== [];
+        $input = $this->flattenCandidateInput($this->toArray($value));
+        foreach ($input as $key => $item) {
+            if (!in_array($key, array_merge(self::SUPPORTED_VALUE_KEYS, self::SUPPORTED_SOURCE_KEYS), true) || !is_scalar($item)) return false;
+            if ($key === 'siteNamePosition' && !in_array(strtolower(trim((string)$item)), ['before', 'after', 'none'], true)) return false;
+        }
+        return $this->normalizeSeoPatch($value) !== [];
     }
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
@@ -180,6 +184,7 @@ class SeomaticFieldAdapter implements FieldAdapterInterface
                 continue;
             }
 
+            if (!is_scalar($flat[$key])) return [];
             $value = trim((string)$flat[$key]);
             if ($value === '') {
                 continue;

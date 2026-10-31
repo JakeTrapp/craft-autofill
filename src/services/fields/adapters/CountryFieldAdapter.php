@@ -127,7 +127,11 @@ class CountryFieldAdapter implements FieldAdapterInterface
             return $this->isValidCountryCode($code) ? $code : '';
         }
 
-        $candidate = trim((string)$value);
+        if (!is_string($value)) {
+            return '';
+        }
+
+        $candidate = trim($value);
         if ($candidate === '') {
             return '';
         }
@@ -154,10 +158,10 @@ class CountryFieldAdapter implements FieldAdapterInterface
 
         $map = [];
         try {
-            $list = Craft::$app->getAddresses()->getCountryRepository()->getList(Craft::$app->language);
-            foreach ($list as $country) {
-                $code = strtoupper((string)($country->getAlpha2() ?? ''));
-                $name = strtolower(trim((string)($country->getName() ?? '')));
+            $list = Craft::$app->getAddresses()->getCountryList(Craft::$app->language);
+            foreach ($list as $countryCode => $countryName) {
+                $code = strtoupper(trim((string)$countryCode));
+                $name = strtolower(trim((string)$countryName));
                 if ($code === '' || $name === '') {
                     continue;
                 }

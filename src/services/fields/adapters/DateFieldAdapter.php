@@ -8,6 +8,7 @@ use craft\base\ElementInterface;
 use craft\base\FieldInterface;
 use craft\elements\Entry;
 use craft\fields\Date;
+use Craft;
 use RuntimeException;
 
 class DateFieldAdapter implements FieldAdapterInterface
@@ -95,11 +96,15 @@ class DateFieldAdapter implements FieldAdapterInterface
 
     public function validateSuggestion(FieldInterface $field, mixed $value): bool
     {
+        if ($value instanceof \DateTimeInterface) {
+            return true;
+        }
+
         if (!is_string($value)) {
             return false;
         }
 
-        return strtotime(trim($value)) !== false;
+        return $this->parseSuggestion($field, $value) !== null;
     }
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
@@ -116,15 +121,14 @@ class DateFieldAdapter implements FieldAdapterInterface
             return '';
         }
 
-        $trimmed = trim($value);
-        $timestamp = strtotime($trimmed);
-        if ($timestamp === false) {
+        $date = $this->parseSuggestion($field, $value);
+        if ($date === null) {
             return '';
         }
 
         return $includesTime
-            ? date(\DateTimeInterface::ATOM, $timestamp)
-            : date('Y-m-d', $timestamp);
+            ? $date->format(\DateTimeInterface::ATOM)
+            : $date->format('Y-m-d');
     }
 
     public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed
@@ -135,7 +139,17 @@ class DateFieldAdapter implements FieldAdapterInterface
             throw new RuntimeException('Could not resolve field handle for date suggestion apply.');
         }
 
-        $entry->setFieldValue($handle, $normalized);
+        $valueToSet = $normalized;
+        if (!$this->includesTime($field)) {
+            // DateTimeHelper parses plain date strings as UTC before converting
+            // them to Craft's timezone, which can shift date-only values back a day.
+            $valueToSet = [
+                'date' => $normalized,
+                'timezone' => Craft::$app->getTimeZone(),
+            ];
+        }
+
+        $entry->setFieldValue($handle, $valueToSet);
         return $normalized;
     }
 
@@ -147,5 +161,23 @@ class DateFieldAdapter implements FieldAdapterInterface
 
         // Craft Date fields expose a `showTime` setting when time should be collected.
         return (bool)($field->showTime ?? false);
+    }
+
+    private function parseSuggestion(FieldInterface $field, string $value): ?\DateTimeImmutable
+    {
+        $value = trim($value);
+        if ($this->includesTime($field) && str_ends_with($value, 'Z')) $value = substr($value, 0, -1) . '+00:00';
+        if ($value === '') {
+            return null;
+        }
+
+        $format = $this->includesTime($field) ? \DateTimeInterface::ATOM : 'Y-m-d';
+        $date = \DateTimeImmutable::createFromFormat('!' . $format, $value);
+        $errors = \DateTimeImmutable::getLastErrors();
+        if (!$date instanceof \DateTimeImmutable || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
+            return null;
+        }
+
+        return $date->format($format) === $value ? $date : null;
     }
 }

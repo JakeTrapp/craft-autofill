@@ -6,6 +6,7 @@ namespace jtdev\craftautofill\controllers;
 
 use Craft;
 use craft\helpers\UrlHelper;
+use craft\helpers\Cp;
 use craft\models\EntryType;
 use craft\models\Volume;
 use craft\web\Controller;
@@ -17,6 +18,16 @@ use yii\web\Response;
 class WorkflowsController extends Controller
 {
     protected array|bool|int $allowAnonymous = false;
+
+    public function actionRoot(): Response
+    {
+        $this->requireCpRequest();
+        $this->requirePermission('accessPlugin-autofill');
+
+        return $this->redirect(UrlHelper::cpUrl(
+            Craft::$app->getUser()->getIsAdmin() ? 'autofill/workflows' : 'autofill/bulk',
+        ));
+    }
 
     public function actionIndex(): Response
     {
@@ -42,13 +53,6 @@ class WorkflowsController extends Controller
 
         if (!$workflow instanceof Workflow) {
             $workflow = new Workflow();
-            $workflow->rows = [[
-                'targetFieldUid' => '', 'prompt' => '', 'requiresApproval' => true,
-                'includeCurrentFieldValue' => true, 'overrideCurrentValue' => true, 'enabled' => true,
-                'seomatic' => ['includeSeoTitle' => true, 'includeSiteNamePosition' => true, 'includeSeoDescription' => true, 'includeSeoKeywords' => true],
-                'related' => ['mode' => 'topN', 'topN' => 25, 'forceUseCurrentValues' => false],
-                'link' => ['entry' => ['mode' => 'topN', 'count' => 10], 'category' => ['mode' => 'topN', 'count' => 10], 'asset' => ['mode' => 'topN', 'count' => 10]],
-            ]];
         }
 
         return $this->renderTemplate('autofill/cp/workflows/edit', [
@@ -57,6 +61,22 @@ class WorkflowsController extends Controller
             'volumes' => $this->volumeOptions(),
             'modelConfigs' => $this->modelConfigOptions(),
         ]);
+    }
+
+    /** @param array<int, array<string, mixed>> $fields
+     * @return array<int, array<string, mixed>>
+     */
+    private function fieldPickerOptions(array $fields): array
+    {
+        return array_map(static function(array $field): array {
+            $field['iconSvg'] ??= Cp::iconSvg(match ($field['adapter'] ?? '') {
+                'date', 'time' => 'calendar',
+                'lightswitch' => 'toggle-on',
+                'assets' => 'image',
+                default => 'font',
+            });
+            return $field;
+        }, $fields);
     }
 
     public function actionFields(): Response
@@ -77,7 +97,7 @@ class WorkflowsController extends Controller
                 }
                 return $this->asJson([
                     'success' => true,
-                    'fields' => AutofillPlugin::getInstance()->getFieldDiscoveryService()->getSupportedVolumeFields($volume),
+                    'fields' => $this->fieldPickerOptions(AutofillPlugin::getInstance()->getFieldDiscoveryService()->getSupportedVolumeFields($volume)),
                     'metadataFields' => $this->assetMetadataOptions($volume),
                 ]);
             }
@@ -89,7 +109,7 @@ class WorkflowsController extends Controller
             }
             return $this->asJson([
                 'success' => true,
-                'fields' => AutofillPlugin::getInstance()->getFieldDiscoveryService()->getSupportedEntryTypeFields($entryType),
+                'fields' => $this->fieldPickerOptions(AutofillPlugin::getInstance()->getFieldDiscoveryService()->getSupportedEntryTypeFields($entryType)),
                 'metadataFields' => $this->assetMetadataOptions(),
             ]);
         } catch (Throwable $exception) {

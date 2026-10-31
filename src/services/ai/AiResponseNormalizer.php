@@ -115,16 +115,12 @@ class AiResponseNormalizer extends Component
                 continue;
             }
 
-            $fieldName = trim((string)($item['fieldName'] ?? ''));
-            if ($fieldName === '') {
-                continue;
-            }
+            $fieldName = is_scalar($item['fieldName'] ?? null) ? trim((string)$item['fieldName']) : '';
 
             $hasRawValue = array_key_exists('value', $item);
             $valueIsNull = $hasRawValue && $item['value'] === null;
             $rawValue = $hasRawValue && !$valueIsNull ? $item['value'] : '';
-            $match = $this->resolveTargetFieldMatch($fieldName, $targetFieldMap)
-                ?? $this->resolveTargetFieldMatchByOrder($index, $orderedTargetFields);
+            $match = $this->resolveTargetFieldMatch($fieldName, $targetFieldMap);
             $displayFieldName = trim((string)($match['name'] ?? $fieldName));
             $targetFieldUid = (string)($match['targetFieldUid'] ?? '');
             $fieldContract = is_array($match['fieldContract'] ?? null) ? $match['fieldContract'] : [];
@@ -149,6 +145,11 @@ class AiResponseNormalizer extends Component
                 $validationErrors,
                 $this->validateSuggestionValue($autofillField, $targetFieldUid, $rawValue, $value, $fieldContract)
             );
+            $existingContext = $config['contextValueByUid'][$targetFieldUid] ?? '';
+            if ($hasRawValue && $this->isEmptySuggestion($rawValue, $value, $adapterKey) &&
+                is_string($existingContext) && !in_array(trim($existingContext), ['', '[]', '{}'], true)) {
+                $validationErrors[] = 'An empty suggestion cannot erase existing content.';
+            }
             [$displayValue, $displayValueIsLabel] = $this->resolveDisplayValue($value, $fieldContract);
             $reviewEditor = $this->buildReviewEditorPayload(
                 $autofillField,
@@ -164,6 +165,7 @@ class AiResponseNormalizer extends Component
                 'fieldName' => $fieldName,
                 'displayFieldName' => $displayFieldName !== '' ? $displayFieldName : $fieldName,
                 'value' => $value,
+                'rawValue' => $item['value'] ?? null,
                 'reviewEditor' => $reviewEditor,
                 'hasRawValue' => $hasRawValue,
                 'valueIsNull' => $valueIsNull,
@@ -216,6 +218,18 @@ class AiResponseNormalizer extends Component
         }
 
         return null;
+    }
+
+    private function isEmptySuggestion(mixed $raw, mixed $normalized, string $adapter): bool
+    {
+        if ($raw === null || $raw === [] || (is_string($raw) && trim($raw) === '')) return true;
+        if (is_array($normalized)) {
+            if ($normalized === []) return true;
+            foreach (['selectedTitles', 'selectedAssetIds', 'rows', 'addresses'] as $key) {
+                if (array_key_exists($key, $normalized) && $normalized[$key] === []) return true;
+            }
+        }
+        return $adapter === 'json' && is_string($normalized) && json_decode($normalized, true) === [];
     }
 
     private function extractConfidence(array $rawResponse): ?float
@@ -289,7 +303,7 @@ class AiResponseNormalizer extends Component
                 continue;
             }
 
-            $map[$this->normalizeName($name)] = [
+            $target = [
                 'targetFieldUid' => $targetFieldUid,
                 'name' => $name,
                 'handle' => $handle,
@@ -300,6 +314,14 @@ class AiResponseNormalizer extends Component
                 'fieldContract' => $config['fieldContractsByUid'][$targetFieldUid] ?? [],
                 'adapterKey' => (string)($config['fieldAdapterKeyByUid'][$targetFieldUid] ?? ''),
             ];
+            foreach ([$name, $handle, $targetFieldUid] as $alias) {
+                $key = $this->normalizeName($alias);
+                if (array_key_exists($key, $map) && ($map[$key]['targetFieldUid'] ?? '') !== $targetFieldUid) {
+                    $map[$key] = null;
+                } elseif (!array_key_exists($key, $map)) {
+                    $map[$key] = $target;
+                }
+            }
         }
 
         return $map;
@@ -459,12 +481,18 @@ class AiResponseNormalizer extends Component
 
         if ($field instanceof FieldInterface) {
             $adapter = AutofillPlugin::getInstance()->getFieldAdapterService()->getAdapterForField($field);
-            if ($adapter !== null && !$adapter->validateSuggestion($field, $normalizedValue)) {
-                $errors[] = 'Suggestion value is not valid for this field type.';
+            if ($adapter !== null) {
+                try {
+                    if (!$adapter->validateSuggestion($field, $rawValue) || !$adapter->validateSuggestion($field, $normalizedValue)) {
+                        $errors[] = 'Suggestion value is not valid for this field type.';
+                    }
+                } catch (Throwable) {
+                    $errors[] = 'Suggestion value is not valid for this field type.';
+                }
             }
         }
 
-        return array_merge($errors, $this->validateByContract($rawValue, $normalizedValue, $fieldContract));
+        return $field instanceof FieldInterface ? $errors : array_merge($errors, $this->validateByContract($rawValue, $normalizedValue, $fieldContract));
     }
 
     /**
@@ -789,6 +817,8 @@ class AiResponseNormalizer extends Component
         $errors = [];
         $type = (string)($fieldContract['type'] ?? 'string');
 
+        if ($type === 'string' && !is_scalar($rawValue) && $rawValue !== null) $errors[] = 'Suggestion value must be text.';
+
         if ($type === 'number' && !is_numeric($normalizedValue)) {
             $errors[] = 'Suggestion value must be numeric.';
         }
@@ -808,7 +838,7 @@ class AiResponseNormalizer extends Component
         }
 
         $format = (string)($fieldContract['format'] ?? '');
-        if (in_array($format, ['date', 'date-time'], true) && strtotime((string)$rawValue) === false) {
+        if (in_array($format, ['date', 'date-time'], true) && (!is_string($rawValue) || !(new \jtdev\craftautofill\services\fields\adapters\DateFieldAdapter())->validateSuggestion(new \craft\fields\Date(['showTime' => $format === 'date-time']), $rawValue))) {
             $errors[] = 'Suggestion value must be a valid date.';
         }
 

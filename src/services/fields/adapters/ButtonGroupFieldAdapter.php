@@ -107,21 +107,7 @@ class ButtonGroupFieldAdapter implements FieldAdapterInterface
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
     {
-        $raw = trim((string)$value);
-        if ($raw === '') {
-            return '';
-        }
-
-        foreach ($this->normalizedOptions($field) as $option) {
-            $optionValue = trim((string)($option['value'] ?? ''));
-            $optionLabel = trim((string)($option['label'] ?? ''));
-
-            if ($raw === $optionValue || strcasecmp($raw, $optionLabel) === 0) {
-                return $optionValue;
-            }
-        }
-
-        return $raw;
+        return OptionFieldValueHelper::normalizeSingleCandidate($value, $this->normalizedOptions($field));
     }
 
     public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed

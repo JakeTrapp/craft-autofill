@@ -90,24 +90,12 @@ class LightswitchFieldAdapter implements FieldAdapterInterface
 
     public function validateSuggestion(FieldInterface $field, mixed $value): bool
     {
-        return is_bool($value);
+        return $this->parseBoolean($value) !== null;
     }
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
     {
-        if (is_bool($value)) {
-            return $value;
-        }
-
-        if (is_numeric($value)) {
-            return (int)$value === 1;
-        }
-
-        if (is_string($value)) {
-            return in_array(strtolower(trim($value)), ['1', 'true', 'yes', 'on'], true);
-        }
-
-        return false;
+        return $this->parseBoolean($value);
     }
 
     public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed
@@ -120,5 +108,26 @@ class LightswitchFieldAdapter implements FieldAdapterInterface
 
         $entry->setFieldValue($handle, $normalized);
         return $normalized;
+    }
+
+    private function parseBoolean(mixed $value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        if ((is_int($value) || is_float($value)) && ($value === 0 || $value === 0.0 || $value === 1 || $value === 1.0)) {
+            return (float)$value === 1.0;
+        }
+
+        if (is_string($value)) {
+            return match (strtolower(trim($value))) {
+                '1', 'true', 'yes', 'on' => true,
+                '0', 'false', 'no', 'off' => false,
+                default => null,
+            };
+        }
+
+        return null;
     }
 }

@@ -124,13 +124,17 @@ class AddressesFieldAdapter implements FieldAdapterInterface
 
     public function validateSuggestion(FieldInterface $field, mixed $value): bool
     {
-        $decoded = $this->toArray($value);
-        if (array_key_exists('addresses', $decoded) && is_array($decoded['addresses'])) {
-            return true;
+        $rows = $this->extractAddressRows($value);
+        if (!$rows || ($field instanceof Addresses && $field->maxAddresses && count($rows) > $field->maxAddresses)) return false;
+        foreach ($rows as $row) {
+            if (!is_array($row) || !$row) return false;
+            $mapped = $this->mapFriendlyKeys($row);
+            foreach ($mapped as $key => $item) {
+                if (!in_array($key, array_merge(self::ADDRESS_KEYS, ['_id']), true) || !is_scalar($item)) return false;
+            }
+            if (!isset($mapped['countryCode']) || $this->normalizeCountryCode((string)$mapped['countryCode']) === '') return false;
         }
-
-        $normalized = $this->normalizeSuggestion($field, $value);
-        return is_array($normalized) && $normalized !== [];
+        return count($this->normalizeSuggestion($field, $value)) === count($rows);
     }
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
@@ -156,6 +160,7 @@ class AddressesFieldAdapter implements FieldAdapterInterface
                     continue;
                 }
 
+                if (!is_scalar($row[$key])) return [];
                 $raw = trim((string)$row[$key]);
                 if ($raw === '') {
                     continue;
@@ -223,10 +228,11 @@ class AddressesFieldAdapter implements FieldAdapterInterface
         }
 
         if (isset($decoded['addresses']) && is_array($decoded['addresses'])) {
-            return array_values(array_filter($decoded['addresses'], fn($row) => is_array($row)));
+            return array_filter($decoded['addresses'], fn($row) => !is_array($row)) ? [] : array_values($decoded['addresses']);
         }
 
         // Accept a single address object as shorthand.
+        $decoded = $this->mapFriendlyKeys($decoded);
         $hasAddressKey = false;
         foreach (self::ADDRESS_KEYS as $key) {
             if (array_key_exists($key, $decoded)) {
@@ -282,6 +288,7 @@ class AddressesFieldAdapter implements FieldAdapterInterface
             $mapped['_id'] = $row['id'];
         }
 
+        foreach (['label', 'country', 'state', 'city', 'zipCode', 'id'] as $alias) unset($mapped[$alias]);
         return $mapped;
     }
 
@@ -389,7 +396,7 @@ class AddressesFieldAdapter implements FieldAdapterInterface
         }
 
         if (strlen($candidate) === 2 && ctype_alpha($candidate)) {
-            return strtoupper($candidate);
+            return in_array(strtoupper($candidate), $this->countryCodeByLowerName(), true) ? strtoupper($candidate) : '';
         }
 
         $lookup = $this->countryCodeByLowerName();
@@ -413,9 +420,9 @@ class AddressesFieldAdapter implements FieldAdapterInterface
         $map = [];
         try {
             $list = Craft::$app->getAddresses()->getCountryRepository()->getList(Craft::$app->language);
-            foreach ($list as $country) {
-                $code = strtoupper((string)($country->getAlpha2() ?? ''));
-                $name = strtolower(trim((string)($country->getName() ?? '')));
+            foreach ($list as $countryCode => $countryName) {
+                $code = strtoupper((string)$countryCode);
+                $name = strtolower(trim((string)$countryName));
                 if ($code === '' || $name === '') {
                     continue;
                 }

@@ -77,7 +77,7 @@ class CkeditorFieldAdapter implements FieldAdapterInterface
 
     public function validateSuggestion(FieldInterface $field, mixed $value): bool
     {
-        return is_string($value);
+        return is_scalar($value);
     }
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
@@ -86,6 +86,7 @@ class CkeditorFieldAdapter implements FieldAdapterInterface
             return trim($value);
         }
 
+        if (is_bool($value)) return $value ? 'true' : 'false';
         if (is_scalar($value)) {
             return trim((string)$value);
         }

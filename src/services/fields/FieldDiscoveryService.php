@@ -6,6 +6,8 @@ namespace jtdev\craftautofill\services\fields;
 
 use craft\base\Component;
 use craft\base\FieldInterface;
+use craft\base\Iconic;
+use craft\helpers\Cp;
 use craft\fields\Link as LinkField;
 use craft\fields\linktypes\Asset as AssetLinkType;
 use craft\fields\linktypes\Category as CategoryLinkType;
@@ -108,6 +110,7 @@ class FieldDiscoveryService extends Component
             'handle' => (string)($field->handle ?? ''),
             'name' => (string)($field->name ?? ''),
             'type' => $field::class,
+            'iconSvg' => Cp::iconSvg($field instanceof Iconic ? $field->getIcon() : $field::icon()),
             'adapter' => $adapterKey,
             'availableInLiteVersion' => $availableInLiteVersion,
         ];

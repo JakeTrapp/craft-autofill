@@ -86,18 +86,40 @@ class NumberFieldAdapter implements FieldAdapterInterface
 
     public function validateSuggestion(FieldInterface $field, mixed $value): bool
     {
-        return is_numeric($value);
+        if (!$field instanceof Number || !is_numeric($value) || !is_finite((float)$value)) {
+            return false;
+        }
+
+        $number = (float)$value;
+        if ($field->min !== null && $number < (float)$field->min) {
+            return false;
+        }
+        if ($field->max !== null && $number > (float)$field->max) {
+            return false;
+        }
+        if ($field->step !== null && (float)$field->step > 0) {
+            $base = $field->min !== null ? (float)$field->min : 0.0;
+            $offset = ($number - $base) / (float)$field->step;
+            if (abs($offset - round($offset)) > 0.000001) {
+                return false;
+            }
+        }
+
+        $precision = max(0, (int)$field->decimals);
+        $decimal = rtrim(rtrim(number_format(abs($number), 12, '.', ''), '0'), '.');
+        $fraction = str_contains($decimal, '.') ? substr(strrchr($decimal, '.'), 1) : '';
+        return strlen($fraction) <= $precision;
     }
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
     {
-        if (is_numeric($value)) {
+        if (is_numeric($value) && is_finite((float)$value)) {
             return (float)$value;
         }
 
         if (is_string($value)) {
             $trimmed = trim($value);
-            if (is_numeric($trimmed)) {
+            if (is_numeric($trimmed) && is_finite((float)$trimmed)) {
                 return (float)$trimmed;
             }
         }

@@ -157,7 +157,7 @@ class AutofillPlugin extends Plugin
             return null;
         }
 
-        $item['url'] = Craft::$app->getUser()->getIsAdmin() ? 'autofill/workflows' : 'autofill/bulk';
+        $item['url'] = 'autofill';
         $item['subnav'] = [
             'bulk' => [
                 'label' => Craft::t('autofill', 'Bulk Autofill'),
@@ -247,7 +247,7 @@ class AutofillPlugin extends Plugin
             UrlManager::class,
             UrlManager::EVENT_REGISTER_CP_URL_RULES,
             static function(RegisterUrlRulesEvent $event): void {
-                $event->rules['autofill'] = 'autofill/workflows/index';
+                $event->rules['autofill'] = 'autofill/workflows/root';
                 $event->rules['autofill/workflows'] = 'autofill/workflows/index';
                 $event->rules['autofill/workflows/new'] = 'autofill/workflows/edit';
                 $event->rules['autofill/workflows/edit/<handle:[a-zA-Z][a-zA-Z0-9_-]*>'] = 'autofill/workflows/edit';

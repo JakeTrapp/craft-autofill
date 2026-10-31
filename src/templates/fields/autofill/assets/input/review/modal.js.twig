@@ -8,6 +8,7 @@
         let currentIndex = 0;
         let isLoading = false;
         let wantsOpen = false;
+        let correctionMade = false;
         let spotlightAnchor = null;
         let spotlightFrame = null;
         const instanceIdAttr = String(instanceId || '').trim();
@@ -275,7 +276,8 @@
             const availableHeight = Math.max(160, window.innerHeight - (viewportPadding * 2));
             modalState.modal.style.setProperty('--autofill-review-max-height', `${availableHeight}px`);
 
-            const modalHeight = modalState.modal.offsetHeight || 320;
+            const panel = modalState.modal.shadowRoot?.querySelector('dialog');
+            const modalHeight = panel?.getBoundingClientRect().height || 320;
             const spaceBelow = window.innerHeight - rect.bottom - viewportPadding;
             const spaceAbove = rect.top - viewportPadding;
             const canFitBelow = spaceBelow >= modalHeight + gap;
@@ -307,20 +309,35 @@
             setLoadingState(false);
             show();
             const current = suggestions[currentIndex];
+            correctionMade = false;
             const validationErrors = Array.isArray(current.validationErrors) ? current.validationErrors : [];
+            const readonly = ['tablePreview', 'iconPreview', 'linkPreview'].includes(current?.reviewEditor?.type);
+            const accept = modalState.modal.querySelector('[data-autofill-accept]');
+            if (accept) {
+                accept.disabled = validationErrors.length > 0 || !current.matchedHandle;
+                accept.textContent = 'Accept';
+            }
+            const rawDetails = modalState.modal.querySelector('[data-autofill-review-raw]');
+            const rawText = modalState.modal.querySelector('[data-autofill-review-raw-value]');
+            if (rawDetails && rawText) {
+                rawDetails.hidden = validationErrors.length === 0;
+                rawDetails.open = validationErrors.length > 0;
+                rawText.textContent = current.hasRawValue === false ? '(No value returned)' : JSON.stringify(Object.prototype.hasOwnProperty.call(current, 'rawValue') ? current.rawValue : current.value, null, 2);
+            }
             const displayMode = current?.reviewEditor?.displayMode || '';
             setModalDisplayMode(displayMode);
             modalState.status.textContent = `${currentIndex + 1} of ${suggestions.length}`;
             modalState.field.textContent = current.displayFieldName || current.fieldName || '(Unmatched field)';
             if (modalState.errors instanceof HTMLElement) {
                 if (validationErrors.length) {
-                    modalState.errors.textContent = validationErrors.join(' ');
+                    modalState.errors.textContent = validationErrors.join(' ') + (readonly ? ' This result is read-only. Skip it or regenerate.' : ' Correct the value below, then check and apply.');
                     modalState.errors.hidden = false;
                 } else {
                     modalState.errors.textContent = '';
                     modalState.errors.hidden = true;
                 }
             }
+            modalState.editor.hidden = readonly && validationErrors.length > 0;
             runtime.renderReviewEditor({
                 suggestion: current,
                 container: modalState.editor,
@@ -330,6 +347,19 @@
                 positionReviewModal: positionBelowField,
             });
         };
+
+        const allowCorrection = () => {
+            const current = suggestions[currentIndex];
+            if (!current || ['tablePreview', 'iconPreview', 'linkPreview'].includes(current?.reviewEditor?.type) || !current.matchedHandle) return;
+            correctionMade = true;
+            const accept = modalState.modal.querySelector('[data-autofill-accept]');
+            if (accept) {
+                accept.disabled = false;
+                accept.textContent = current.validationErrors?.length ? 'Check & apply' : 'Accept';
+            }
+        };
+        modalState.editor?.addEventListener('input', allowCorrection);
+        modalState.editor?.addEventListener('change', allowCorrection);
 
         const clear = () => {
             suggestions = [];
@@ -384,6 +414,7 @@
                 }
                 const current = suggestions[currentIndex];
                 const editorType = String(current?.reviewEditor?.type || '').trim();
+                if (current.validationErrors?.length && (!correctionMade || ['tablePreview', 'iconPreview', 'linkPreview'].includes(editorType))) return;
                 if (editorType !== 'tablePreview') {
                     current.value = runtime.readReviewEditorValue({
                         suggestion: current,

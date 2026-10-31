@@ -1,5 +1,6 @@
 {% extends '_layouts/cp.twig' %}
-{% set title = workflow.id ? 'Edit Workflow'|t('autofill') : 'New Workflow'|t('autofill') %}
+{% set title = workflow.id ? workflow.name : 'New workflow'|t('autofill') %}
+{% set crumbs = [{ label: 'Workflows'|t('autofill'), url: url('autofill/workflows') }] %}
 {% set selectedSubnavItem = 'workflows' %}
 {% do view.registerAssetBundle('jtdev\\craftautofill\\web\\assets\\cp\\AutofillCpAsset') %}
 {% set options = {
@@ -9,6 +10,9 @@
     fieldsUrl: actionUrl('autofill/workflows/fields'),
     saveUrl: actionUrl('autofill/workflows/save'),
 } %}
+{% block actionButton %}
+    <div id="autofill-workflow-actions"></div>
+{% endblock %}
 {% block content %}
     <div data-autofill-vue-root data-screen="editor" data-options="{{ options|json_encode|e('html_attr') }}"></div>
 {% endblock %}

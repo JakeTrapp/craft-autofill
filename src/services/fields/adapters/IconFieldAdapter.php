@@ -134,6 +134,10 @@ class IconFieldAdapter implements FieldAdapterInterface
             return trim($value->name);
         }
 
+        if (!is_scalar($value) && !(is_object($value) && method_exists($value, '__toString'))) {
+            return '';
+        }
+
         $raw = trim((string)$value);
         if ($raw === '') {
             return '';

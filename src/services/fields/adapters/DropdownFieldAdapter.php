@@ -105,20 +105,22 @@ class DropdownFieldAdapter implements FieldAdapterInterface
 
     public function validateSuggestion(FieldInterface $field, mixed $value): bool
     {
-        return is_scalar($value) || is_string($value);
+        if (!$field instanceof Dropdown) {
+            return false;
+        }
+
+        $normalized = $this->normalizeSuggestion($field, $value);
+        return is_string($normalized) && OptionFieldValueHelper::matchesSingleValue(
+            $normalized,
+            OptionFieldValueHelper::normalizedOptionsFromBaseField($field),
+        );
     }
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
     {
-        if (is_string($value)) {
-            return trim($value);
-        }
-
-        if (is_scalar($value)) {
-            return trim((string)$value);
-        }
-
-        return '';
+        return $field instanceof Dropdown
+            ? OptionFieldValueHelper::normalizeSingleCandidate($value, OptionFieldValueHelper::normalizedOptionsFromBaseField($field))
+            : '';
     }
 
     public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed

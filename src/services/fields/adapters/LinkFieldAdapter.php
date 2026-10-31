@@ -255,7 +255,7 @@ class LinkFieldAdapter implements FieldAdapterInterface
             return false;
         }
 
-        if ($linkType instanceof BaseElementLinkType && !$this->elementExistsForLinkType($linkType, $normalizedValue)) {
+        if ($linkType instanceof BaseElementLinkType && !$this->elementExistsForLinkType($typeId, $linkType, $normalizedValue)) {
             return false;
         }
 
@@ -312,8 +312,21 @@ class LinkFieldAdapter implements FieldAdapterInterface
             return [null, []];
         }
 
+        foreach (['type', 'value', 'candidateKey', 'candidate', 'label', 'urlSuffix'] as $key) {
+            if (array_key_exists($key, $input) && !is_string($input[$key])) {
+                return [null, []];
+            }
+        }
+        if (array_key_exists('openInNewTab', $input) && !is_bool($input['openInNewTab'])) {
+            return [null, []];
+        }
+
         $linkTypes = $field->getLinkTypes();
-        $typeId = $this->normalizeTypeId((string)($input['type'] ?? ''), $linkTypes);
+        $rawType = trim((string)($input['type'] ?? ''));
+        $typeId = $this->normalizeTypeId($rawType, $linkTypes);
+        if (array_key_exists('type', $input) && ($rawType === '' || $typeId === '')) {
+            return [null, []];
+        }
         $candidateKey = trim((string)($input['candidateKey'] ?? $input['candidate'] ?? ''));
         $rawInputValue = (string)($input['value'] ?? '');
         $rawValue = $this->normalizeRawTextLinkValue($rawInputValue);
@@ -960,10 +973,16 @@ class LinkFieldAdapter implements FieldAdapterInterface
         return (int)$entryId;
     }
 
-    private function elementExistsForLinkType(BaseElementLinkType $linkType, string $value): bool
+    private function elementExistsForLinkType(string $typeId, BaseElementLinkType $linkType, string $value): bool
     {
         try {
-            return $linkType->element($value) instanceof ElementInterface;
+            $element = $linkType->element($value);
+            if (!$element instanceof ElementInterface || !is_numeric($element->id)) {
+                return false;
+            }
+            $query = $this->buildElementQueryForLinkType($typeId, $linkType);
+            $query->id((int)$element->id);
+            return $query->one() instanceof ElementInterface;
         } catch (\Throwable) {
             return false;
         }

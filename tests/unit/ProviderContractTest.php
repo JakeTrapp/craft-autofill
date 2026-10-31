@@ -54,6 +54,33 @@ final class ProviderContractTest extends TestCase
         self::assertSame('custom-model', $generic->modelId);
     }
 
+    #[DataProvider('missingKeyProviders')]
+    public function testMissingApiKeyIsReportedBeforeAnyHttpRequest(string $class, string $provider): void
+    {
+        $config = $this->config($provider);
+        $config->apiKeyEnv = '$AUTOFILL_MISSING_TEST_KEY_' . bin2hex(random_bytes(8));
+        self::assertSame('', $config->getParsedApiKey());
+        $adapter = new $class();
+
+        try {
+            $adapter->generate($this->request(), $config);
+            self::fail('Generation must reject a missing API key.');
+        } catch (RuntimeException $exception) {
+            self::assertStringContainsString('API key environment variable resolved to an empty value.', $exception->getMessage());
+        }
+        self::assertSame([], $adapter->history);
+    }
+
+    public static function missingKeyProviders(): array
+    {
+        return [
+            'OpenAI' => [MockOpenAiProvider::class, 'openai'],
+            'Anthropic' => [MockAnthropicProvider::class, 'anthropic'],
+            'DeepSeek' => [MockDeepSeekProvider::class, 'deepseek'],
+            'Gemini' => [MockGeminiProvider::class, 'gemini'],
+        ];
+    }
+
     #[DataProvider('providerPayloads')]
     public function testProviderBuildsNativeImagePayload(string $class, string $provider, string $expectedType): void
     {

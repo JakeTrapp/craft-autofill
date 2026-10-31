@@ -58,6 +58,7 @@ class EntrySuggestionApplyService extends Component
         $targetHandle = '';
 
         if (str_starts_with($targetFieldUid, '__native__:')) {
+            $appliedValue = \jtdev\craftautofill\services\ai\SuggestionValueGuard::checked($autofillField, $entry, $targetFieldUid, $suggestion);
             $this->applyNativeFieldValue($entry, $targetFieldUid, $appliedValue);
         } else {
             $field = $targetFieldUid !== ''
@@ -89,6 +90,7 @@ class EntrySuggestionApplyService extends Component
                 throw new RuntimeException(sprintf('No adapter available for field UID "%s".', $targetFieldUid));
             }
 
+            $rawValue = \jtdev\craftautofill\services\ai\SuggestionValueGuard::checked($autofillField, $entry, $targetFieldUid, $suggestion);
             $targetHandle = (string)($field->handle ?? '');
             $appliedValue = $adapter->applySuggestionToEntry($field, $entry, $rawValue);
         }

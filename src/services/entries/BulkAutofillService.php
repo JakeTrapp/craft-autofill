@@ -440,20 +440,29 @@ class BulkAutofillService extends Component
             }
 
             $appliedCount = 0;
+            $suggestionErrors = [];
             foreach ($normalizedResult->suggestions as $suggestion) {
                 if (!is_array($suggestion)) {
                     continue;
                 }
 
-                $plugin->getEntrySuggestionApplyService()->applySuggestion($fieldId, $entryId, $siteId, $suggestion);
-                $appliedCount++;
+                if (!empty($suggestion['validationErrors'])) {
+                    $suggestionErrors[] = ($suggestion['displayFieldName'] ?? $suggestion['fieldName'] ?? 'Field') . ': ' . implode(' ', $suggestion['validationErrors']);
+                    continue;
+                }
+                try {
+                    $plugin->getEntrySuggestionApplyService()->applySuggestion($fieldId, $entryId, $siteId, $suggestion);
+                    $appliedCount++;
+                } catch (Throwable $exception) {
+                    $suggestionErrors[] = ($suggestion['displayFieldName'] ?? $suggestion['fieldName'] ?? 'Field') . ': ' . $exception->getMessage();
+                }
             }
 
             $plugin->getAiRequestLogService()->complete($logId, [
                 'responseRawText' => $responseRawText,
-                'responsePayloadJson' => $this->encodeJson($rawResponse),
-                'success' => true,
-                'errorMessage' => null,
+                'responsePayloadJson' => $this->encodeJson(['providerResponse' => $rawResponse, 'suggestions' => $normalizedResult->suggestions]),
+                'success' => $suggestionErrors === [],
+                'errorMessage' => $suggestionErrors ? implode(' ', $suggestionErrors) : null,
                 'latencyMs' => (int)round((microtime(true) - $startedAt) * 1000),
                 'inputTokens' => $usage['inputTokens'],
                 'outputTokens' => $usage['outputTokens'],
@@ -463,9 +472,9 @@ class BulkAutofillService extends Component
 
             return [
                 'entryId' => $entryId,
-                'success' => true,
+                'success' => $suggestionErrors === [],
                 'suggestionsApplied' => $appliedCount,
-                'error' => null,
+                'error' => $suggestionErrors ? implode(' ', $suggestionErrors) : null,
             ];
         } catch (Throwable $exception) {
             $plugin->getAiRequestLogService()->complete($logId, [

@@ -120,17 +120,22 @@ class EmailFieldAdapter implements FieldAdapterInterface
         }
 
         // Common AI formatting miss: [email@example.com](mailto:email@example.com)
-        if (preg_match('/mailto:([^)\s>]+)/i', $raw, $match) === 1) {
+        if (preg_match('/^mailto:([^)\s>]+)$/i', $raw, $match) === 1) {
             $mailto = trim((string)($match[1] ?? ''));
             if ($mailto !== '' && filter_var($mailto, FILTER_VALIDATE_EMAIL) !== false) {
                 return $mailto;
             }
         }
 
-        // Fallback: extract the first email-looking token from surrounding text.
-        if (preg_match('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', $raw, $match) === 1) {
-            $email = trim((string)($match[0] ?? ''));
-            if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL) !== false) {
+        // Accept a bare address or an exact markdown mailto link. Do not guess
+        // which address to use when the response contains surrounding prose.
+        if (filter_var($raw, FILTER_VALIDATE_EMAIL) !== false) {
+            return $raw;
+        }
+
+        if (preg_match('/^\[[^\]]+\]\(mailto:([^\s)]+)\)$/i', $raw, $match) === 1) {
+            $email = trim((string)($match[1] ?? ''));
+            if (filter_var($email, FILTER_VALIDATE_EMAIL) !== false) {
                 return $email;
             }
         }

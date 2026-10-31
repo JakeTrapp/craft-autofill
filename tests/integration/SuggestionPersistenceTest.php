@@ -150,21 +150,16 @@ final class SuggestionPersistenceTest extends Unit
             'handle' => 'unusedTarget',
         ]), AutofillPlugin::EDITION_LITE);
 
-        AutofillPlugin::getInstance()->getEntrySuggestionApplyService()->applySuggestion(
-            (int)$project['autofill']->id,
-            (int)$project['entry']->id,
-            $project['siteId'],
-            [
-                'targetFieldUid' => '__native__:title',
-                'matchedHandle' => 'title',
-                'value' => 'Saved native title',
-            ],
-        );
+        $definition = clone $project['autofill'];
+        $definition->rows = [['targetFieldUid' => '__native__:title', 'prompt' => 'Write a title.', 'enabled' => true]];
+        AutofillPlugin::getInstance()->getWorkflowRuntimeService()->apply($definition, $project['entry'], [
+            'targetFieldUid' => '__native__:title', 'value' => 'Saved native title',
+        ]);
 
         self::assertSame('Saved native title', TestProject::reloadEntry($project['entry'])->title);
     }
 
-    public function testDirectApplyKeepsCurrentAdvisoryValidationBehavior(): void
+    public function testDirectApplyRejectsMissingValueAndPreservesExistingContent(): void
     {
         $project = TestProject::create(new PlainText([
             'name' => 'Advisory Value',
@@ -181,13 +176,14 @@ final class SuggestionPersistenceTest extends Unit
         );
         self::assertContains('Suggestion is missing a value.', $result->suggestions[0]['validationErrors']);
 
-        AutofillPlugin::getInstance()->getEntrySuggestionApplyService()->applySuggestion(
-            (int)$project['autofill']->id,
-            (int)$project['entry']->id,
-            $project['siteId'],
-            $result->suggestions[0],
-        );
-
-        self::assertNull(TestProject::reloadEntry($project['entry'])->getFieldValue('advisoryValue'));
+        try {
+            AutofillPlugin::getInstance()->getEntrySuggestionApplyService()->applySuggestion(
+                (int)$project['autofill']->id, (int)$project['entry']->id, $project['siteId'], $result->suggestions[0],
+            );
+            self::fail('Missing output value was applied.');
+        } catch (\RuntimeException $exception) {
+            self::assertNotSame('', $exception->getMessage());
+        }
+        self::assertSame('Existing value', TestProject::reloadEntry($project['entry'])->getFieldValue('advisoryValue'));
     }
 }

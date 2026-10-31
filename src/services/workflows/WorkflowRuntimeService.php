@@ -125,14 +125,16 @@ class WorkflowRuntimeService extends Component
         try {
             $response = $plugin->getAiService()->generateFromRequestDetailed($request, $model);
             $result = $response['result'];
+            $raw = $response['rawResponse'];
+            $text = (string)($raw['output_text'] ?? json_encode($result->suggestions, JSON_THROW_ON_ERROR));
             if (!$result->success) {
                 throw new RuntimeException($result->error ?? 'AI response was invalid.');
             }
-            $raw = $response['rawResponse'];
-            $text = (string)($raw['output_text'] ?? json_encode($result->suggestions, JSON_THROW_ON_ERROR));
             $suggestions = $this->normalize($text, $definition, $element);
             $plugin->getAiRequestLogService()->complete($logId, [
-                'success' => true,
+                'success' => !array_filter($suggestions, static fn(array $item): bool => $item['validationErrors'] !== []),
+                'errorMessage' => array_filter($suggestions, static fn(array $item): bool => $item['validationErrors'] !== []) ? 'One or more suggestions need correction. Valid suggestions remain usable.' : null,
+                'responsePayloadJson' => json_encode(['suggestions' => $suggestions], JSON_THROW_ON_ERROR),
                 'responseRawText' => $text,
                 'latencyMs' => (int)((microtime(true) - $started) * 1000),
                 'inputTokens' => $raw['usage']['input_tokens'] ?? null,
@@ -144,6 +146,7 @@ class WorkflowRuntimeService extends Component
         } catch (Throwable $e) {
             $plugin->getAiRequestLogService()->complete($logId, [
                 'success' => false, 'errorMessage' => $e->getMessage(),
+                'responseRawText' => $text ?? null,
                 'latencyMs' => (int)((microtime(true) - $started) * 1000),
             ]);
             throw $e;
@@ -190,7 +193,7 @@ class WorkflowRuntimeService extends Component
         if ($row === null || !array_key_exists('value', $suggestion)) {
             throw new RuntimeException('The suggestion must have a value and target a configured output field.');
         }
-        $value = $suggestion['value'];
+        $value = \jtdev\craftautofill\services\ai\SuggestionValueGuard::checked($definition, $element, $uid, $suggestion);
         if (str_starts_with($uid, '__native__:')) {
             $handle = substr($uid, strlen('__native__:'));
             $allowed = $element instanceof Asset ? ['title', 'alt'] : ['title', 'slug', 'enabled', 'postDate', 'expiryDate'];

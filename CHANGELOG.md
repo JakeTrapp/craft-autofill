@@ -6,6 +6,16 @@
 - Added built-in Anthropic, DeepSeek, and Google Gemini model configurations alongside OpenAI.
 - Added asset-volume workflows, selected asset metadata and file inputs, configurable file counts, and clear unsupported-input errors. File content and temporary access links are excluded from request logs.
 - Added separate root unit, Craft integration, and Playwright browser suites, with a generated disposable Craft environment and release-package exclusions.
+- Simplified the workflows list and moved workflow actions into Craft's page header.
+- Improved workflow editing with side-by-side context and output panels, drag-and-drop ordering, compact instruction previews, field-type icons, and optional settings under Advanced.
+- Added Craft-native field selection pop-ups that create a card only after a field is selected and prevent duplicate assignments across context and outputs.
+- Added clearer dropdown controls, light help tooltips, distinct panel heading accents, and separate selection, warning, and error states.
+- Fixed new workflows starting with an unusable blank output card and Autofill's sidebar submenu collapsing on Bulk Autofill and Logs.
+- Revalidated suggestions and editor corrections on the server before saving. Missing, null, and empty results can no longer erase existing content.
+- Preserved invalid returned values and validation details for review and logging. Supported editors can correct invalid values; invalid read-only results cannot be accepted, and valid suggestions in the same response remain usable, including during bulk runs.
+- Tightened field-specific validation and safe conversions for option labels, numeric limits and precision, text limits, dates and times, countries, addresses, structured data, and relationship sources. Ambiguous values and malformed rows or selections are rejected instead of guessed, truncated, or silently discarded.
+- Fixed date-only values shifting across time zones, country-name lookup, currency values being rounded during conversion, and missing API-key environment variables causing a PHP error.
+- Expanded edge-case and Craft persistence coverage across all 26 field adapters, with a per-field coverage guide and browser checks for editable and read-only failures.
 
 ## 1.0.7 - 2026-07-27
 - Fixed a bug that cut off plain text fields value

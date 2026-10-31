@@ -123,6 +123,11 @@ class TimeFieldAdapter implements FieldAdapterInterface
             return false;
         }
 
+        $increment = max(1, (int)$field->minuteIncrement);
+        if ((int)substr($normalized, 3, 2) % $increment !== 0) {
+            return false;
+        }
+
         return true;
     }
 
