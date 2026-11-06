@@ -125,7 +125,7 @@ class AutofillField extends Field
     {
         if ($this->workflowHandle !== '') {
             $workflow = AutofillPlugin::getInstance()->getWorkflowService()->getByHandle($this->workflowHandle);
-            if ($workflow === null) {
+            if ($workflow === null || $workflow->archived) {
                 return '';
             }
 
@@ -141,6 +141,9 @@ class AutofillField extends Field
                 return '';
             }
 
+            $actor = Craft::$app->getUser()->getIdentity();
+            if ($actor === null && !Craft::$app->getRequest()->getIsConsoleRequest()) return '';
+            if ($actor !== null && !AutofillPlugin::getInstance()->getWorkflowAccess()->canView($workflow, $actor)) return '';
             $field = AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow);
             $field->id = $this->id;
             $field->uid = $this->uid;

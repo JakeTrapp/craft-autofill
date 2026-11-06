@@ -2,7 +2,7 @@
 
 <div class="autofill-review-modal-backdrop" data-autofill-review-backdrop{% if modalInstanceAttr != '' %} data-autofill-instance-id="{{ modalInstanceAttr }}"{% endif %} hidden></div>
 
-<pk-dialog class="autofill-review-modal" data-autofill-review-modal{% if modalInstanceAttr != '' %} data-autofill-instance-id="{{ modalInstanceAttr }}"{% endif %} size="wide" label="Suggestion Review" disable-pointer-dismissal hidden>
+<pk-dialog class="autofill-review-modal" data-autofill-review-modal{% if modalInstanceAttr != '' %} data-autofill-instance-id="{{ modalInstanceAttr }}"{% endif %} size="wide" label="Suggestion Review" disable-pointer-dismissal disable-scroll-lock hidden>
     <div class="autofill-review-modal__header" slot="header">
         <h2 class="autofill-review-modal__title">Suggestion Review</h2>
         <p class="autofill-review-modal__counter" data-autofill-review-status></p>
@@ -11,7 +11,7 @@
         <span class="autofill-review-modal__spinner" aria-hidden="true"></span>
         <p class="autofill-review-modal__loading-text" data-autofill-review-loading-text>Waiting for response from AI...</p>
     </div>
-    <div class="autofill-review-modal__body ltr">
+    <div class="autofill-review-modal__body ltr" id="autofill-review-body-{{ modalInstanceAttr }}">
         <div class="autofill-review-modal__field" data-autofill-review-field></div>
         <p class="autofill-review-modal__errors" data-autofill-review-errors hidden></p>
         <details data-autofill-review-raw hidden>
@@ -22,8 +22,10 @@
     </div>
     <div class="autofill-review-modal__buttons" slot="footer">
         <button type="button" class="btn submit" data-autofill-accept>Accept</button>
+        <button type="button" class="btn" data-autofill-reject>Reject</button>
         <button type="button" class="btn" data-autofill-prev>Prev</button>
         <button type="button" class="btn" data-autofill-next>Next</button>
+        <button type="button" class="btn" data-autofill-inspect data-inspect-label="{{ 'Inspect field'|t('autofill') }}" data-suggestion-label="{{ 'Show suggestion'|t('autofill') }}" aria-expanded="true" aria-controls="autofill-review-body-{{ modalInstanceAttr }}">{{ 'Inspect field'|t('autofill') }}</button>
         <button type="button" class="btn" data-autofill-close>Close</button>
     </div>
 </pk-dialog>

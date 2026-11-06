@@ -1,0 +1,51 @@
+{% extends '_layouts/cp.twig' %}
+{% set title = 'Autofill inbox'|t('autofill') %}
+{% set selectedSubnavItem = 'inbox' %}
+{% do view.registerAssetBundle('craft\\web\\assets\\admintable\\AdminTableAsset') %}
+{% set statuses = {ready: 'Ready to review', queued: 'Queued', running: 'Running', completed: 'Completed', failed: 'Failed'} %}
+{% if runs|length == 100 %}
+    {% set contentNotice = 'Showing the latest 100 accessible runs in this view.'|t('autofill') %}
+{% endif %}
+
+{% block sidebar %}
+    <nav aria-label="{{ 'Run status'|t('autofill') }}"><ul>
+        {% for value, label in statuses %}
+            <li><a href="{{ url('autofill/inbox', {status: value}) }}"{% if status == value %} class="sel" aria-current="page"{% endif %}>{{ label|t('autofill') }}</a></li>
+        {% endfor %}
+    </ul></nav>
+{% endblock %}
+
+{% block content %}
+    <div id="autofill-inbox-admin-table"></div>
+{% endblock %}
+
+{% set tableData = [] %}
+{% for run in runs %}
+    {% set tableData = tableData|merge([{
+        id: run.id, title: run.elementTitle, url: url('autofill/inbox/' ~ run.id),
+        workflow: run.workflowName,
+        contentType: run.elementType == 'asset' ? 'Assets'|t('app') : 'Entries'|t('app'),
+        statusLabel: statuses[run.status]|t('autofill'),
+        menu: {showItems: false, label: 'View results'|t('autofill'), url: url('autofill/inbox/' ~ run.id)},
+        detail: {title: 'Error'|t('app'), content: run.error ? {'Error' : run.error} : '', showAsList: true},
+    }]) %}
+{% endfor %}
+
+{% js %}
+    new Craft.VueAdminTable({
+        container: '#autofill-inbox-admin-table',
+        columns: [
+            {name: '__slot:title', title: {{ 'Content'|t('app')|json_encode|raw }}},
+            {name: 'workflow', title: {{ 'Workflow'|t('autofill')|json_encode|raw }}, callback: Craft.escapeHtml},
+            {name: 'contentType', title: {{ 'Content type'|t('autofill')|json_encode|raw }}, callback: Craft.escapeHtml},
+            {name: 'statusLabel', title: {{ 'Status'|t('app')|json_encode|raw }}, callback: Craft.escapeHtml},
+            {name: '__slot:menu', title: ''},
+            {name: '__slot:detail', title: ''},
+        ],
+        tableData: {{ tableData|json_encode|raw }},
+        search: true,
+        searchParams: ['title', 'workflow', 'contentType', 'statusLabel'],
+        itemLabels: {singular: {{ 'run'|t('autofill')|json_encode|raw }}, plural: {{ 'runs'|t('autofill')|json_encode|raw }}},
+        emptyMessage: {{ 'No runs in this view.'|t('autofill')|json_encode|raw }},
+    });
+{% endjs %}

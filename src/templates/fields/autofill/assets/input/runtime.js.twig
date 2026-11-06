@@ -59,6 +59,10 @@
             await runtime.applySuggestionViaServer({ endpoint: config.applySuggestionActionUrl, ...base, suggestion });
             return true;
         };
+        if (mode === 'generate' && root?._autofillStart) {
+            await root._autofillStart(request);
+            return;
+        }
         if (mode === 'generate') {
             reviewModal.showLoading('Waiting for response from AI...');
             const suggestions = await runtime.generateSuggestions({ endpoint: config.generateSuggestionsActionUrl, ...base, userPrompt: request.userPrompt || '' });
@@ -83,13 +87,16 @@
             return;
         }
         const root = document.querySelector(`[data-autofill-instance-id="${CSS.escape(config.instanceId)}"]`);
-        statusMessage(root, suggestions.length ? 'No changes were applied.' : 'No suggestions were returned.');
+        const allUnchanged = suggestions.length > 0 && suggestions.every(item => item.state === 'unchanged');
+        statusMessage(root, allUnchanged ? 'Suggestions already match the saved fields.' : suggestions.length ? 'No changes were applied.' : 'No suggestions were returned.');
     };
 
     const statusMessage = (root, message) => {
         const node = root.querySelector('[data-autofill-run-status]');
-        if (node instanceof HTMLElement) { node.textContent = message; node.hidden = false; }
-        else window.alert(message);
+        if (node instanceof HTMLElement) { node.textContent = message; node.hidden = !message; }
+        else if (message) window.alert(message);
+        const compact = root.querySelector('[data-autofill-sidebar-state]');
+        if (compact instanceof HTMLElement) { compact.textContent = message; compact.title = message; compact.hidden = !message; }
     };
 
     const saveFirst = async (root, config, mode, request, reviewModal) => {
@@ -207,6 +214,27 @@
         const config = parseConfig(root);
         runtime.iconSvgActionUrl = String(config.iconSvgActionUrl || runtime.iconSvgActionUrl || '');
         const isTestMode = config.testMode !== false;
+        const sidebarBody = root.querySelector('[data-autofill-sidebar-body]');
+        const sidebarToggle = root.querySelector('[data-autofill-toggle]');
+        const sidebarStateKey = `autofill:sidebar-open:${config.workflowHandle}:${config.elementId}`;
+        const setSidebarOpen = (open) => {
+            if (!(sidebarBody instanceof HTMLElement) || !(sidebarToggle instanceof HTMLElement)) return;
+            sidebarBody.hidden = !open;
+            sidebarToggle.setAttribute('aria-expanded', String(open));
+            sessionStorage.setItem(sidebarStateKey, open ? '1' : '0');
+        };
+        if (sidebarToggle) {
+            setSidebarOpen(sessionStorage.getItem(sidebarStateKey) === '1');
+            sidebarToggle.addEventListener('click', () => setSidebarOpen(sidebarToggle.getAttribute('aria-expanded') !== 'true'));
+        }
+        const flashKey = `autofill:applied-flash:${config.workflowHandle}:${config.elementId}`;
+        const appliedFlash = sessionStorage.getItem(flashKey);
+        if (appliedFlash) {
+            sessionStorage.removeItem(flashKey);
+            window.Craft?.cp?.displayNotice(`${appliedFlash} Autofill field(s) applied.`);
+        }
+
+        generateButton.disabled = config.canStart === false;
         const userPrompt = () => userPromptInput instanceof HTMLTextAreaElement ? userPromptInput.value : '';
         const savedLauncherState = window.sessionStorage.getItem(launcherStateKey(config));
         if (savedLauncherState) {
@@ -217,7 +245,118 @@
                 if (responseInput instanceof HTMLTextAreaElement && typeof state.rawResponse === 'string') responseInput.value = state.rawResponse;
             } catch (_error) { /* Ignore invalid transient state. */ }
         }
+        const originalButtonLabel = generateButton.textContent;
+        let currentRun = null;
+        let pollTimer = null;
+        let autoOpenReview = config.autoOpenReview === true;
+        const requestRun = async (endpoint, payload) => runtime.runRequest(endpoint, payload);
+        const consumeReviewLink = (run) => {
+            // Consume the inbox handoff before opening. Closing review reloads
+            // the editor, which must not repeat the automatic-open request.
+            const url = new URL(window.location.href);
+            if (url.searchParams.get('autofillRun') === String(run.id)) {
+                url.searchParams.delete('autofillRun');
+                window.history.replaceState(window.history.state, '', url.toString());
+            }
+        };
+        const showRunReview = (run) => {
+            const pending = (run.suggestions || []).filter(item => item.state === 'pending' && item.canApply !== false);
+            if (!run.canReview) { statusMessage(root, 'You do not have permission to review these results.'); return; }
+            if (!pending.length) { statusMessage(root, 'No pending fields are available to you.'); return; }
+            if (run.stale?.context || run.stale?.outputs?.length) {
+                window.Craft?.cp?.displayNotice('Content changed since generation. Review carefully before applying these results.');
+            }
+            consumeReviewLink(run);
+            reviewModal.setSuggestions(pending);
+        };
+        const updateRun = (run, notify = false) => {
+            currentRun = run;
+            root.dataset.autofillRunState = run?.status || 'idle';
+            const waiting = run && ['queued', 'running'].includes(run.status);
+            generateButton.disabled = !!waiting || ((!!config.selectedRunId || config.canStart === false) && run?.status !== 'ready');
+            const regenerate = root.querySelector('[data-autofill-regenerate]');
+            const cancel = root.querySelector('[data-autofill-cancel]');
+            if (regenerate) regenerate.hidden = !run?.canRegenerate;
+            if (cancel) cancel.hidden = !run?.canCancel;
+            generateButton.textContent = waiting ? 'Running…' : run?.status === 'ready' ? (config.sidebar ? 'Review' : 'Review results') : originalButtonLabel;
+            if (config.sidebar) {
+                generateButton.classList.toggle('submit', run?.status === 'ready');
+                generateButton.setAttribute('aria-label', `${generateButton.textContent} ${config.workflowName}`);
+                if (waiting) statusMessage(root, 'Generating results…');
+            }
+            if (!run) return;
+            const applied = (run.suggestions || []).filter(item => item.state === 'applied').length;
+            const automaticApplied = (run.suggestions || []).filter(item => item.state === 'applied' && item.applicationMode === 'automatic').length;
+            if (automaticApplied && ['ready', 'completed'].includes(run.status)) {
+                const refreshKey = `autofill:applied-refresh:${run.id}`;
+                if (!sessionStorage.getItem(refreshKey)) {
+                    const editor = currentEditor(root);
+                    const container = editor?.$container?.[0];
+                    const baseline = container && window.$ ? window.$(container).data('initialSerializedValue') : undefined;
+                    if (editor && typeof baseline === 'string') {
+                        if (editor.serializeForm(true) === baseline) {
+                            sessionStorage.setItem(refreshKey, '1');
+                            sessionStorage.setItem(`autofill:applied-flash:${config.workflowHandle}:${config.elementId}`, String(automaticApplied));
+                            window.location.reload();
+                            return;
+                        }
+                        statusMessage(root, `${applied} field(s) saved in the background. This editor has unsaved changes; reload when ready to see the saved values.`);
+                        if (notify) window.Craft?.cp?.displayNotice('Autofill saved fields in the background. Your unsaved editor changes have been kept.');
+                        // Still provide the review action for mixed runs; never reload over user edits.
+                        return;
+                    }
+                }
+            }
+
+            if (run.status === 'ready') {
+                const appliedMessage = applied ? `${applied} field(s) applied.` : '';
+                statusMessage(root, config.sidebar ? appliedMessage : [appliedMessage, 'Results are ready to review.'].filter(Boolean).join(' '));
+                if (notify) window.Craft?.cp?.displayNotice('Autofill results are ready to review.');
+                if (autoOpenReview) {
+                    autoOpenReview = false;
+                    showRunReview(run);
+                }
+            } else if (run.status === 'completed') {
+                const allUnchanged = run.suggestions?.length && run.suggestions.every(item => item.state === 'unchanged');
+                const completion = allUnchanged ? 'Suggestions already match the saved fields.' : 'Autofill complete.';
+                statusMessage(root, applied ? `${applied} field(s) applied.` : completion);
+                if (notify) window.Craft?.cp?.displayNotice(applied ? 'Autofill fields were applied.' : completion);
+                if (autoOpenReview) {
+                    autoOpenReview = false;
+                    consumeReviewLink(run);
+                }
+            } else if (run.status === 'failed') statusMessage(root, run.error || 'Autofill failed.');
+            if (waiting) {
+                clearTimeout(pollTimer);
+                pollTimer = setTimeout(async () => {
+                    if (!root.isConnected) return;
+                    try {
+                        const data = await requestRun(config.runStatusActionUrl, { runId: run.id });
+                        updateRun(data.run, true);
+                    } catch (error) { statusMessage(root, error.message); generateButton.disabled = false; }
+                }, 2000);
+            }
+        };
+        root._autofillStart = async (request) => {
+            if (currentRun?.status === 'ready') {
+                const data = await requestRun(config.runStatusActionUrl, { runId: currentRun.id });
+                updateRun(data.run);
+                if (data.run.status === 'ready') showRunReview(data.run);
+                return;
+            }
+            const data = await requestRun(config.startRunActionUrl, {
+                workflowHandle: config.workflowHandle, elementId: Number(config.elementId), siteId: Number(config.siteId) || null,
+                userPrompt: request.userPrompt || '',
+            });
+            updateRun(data.run);
+            window.Craft?.cp?.runQueue?.();
+        };
         const applySuggestionServer = async (suggestion) => {
+            if (currentRun?.status === 'ready' && Number.isInteger(suggestion.index)) {
+                const data = await requestRun(config.decideRunActionUrl, { runId: currentRun.id, index: suggestion.index, accept: true, suggestion });
+                updateRun(data.run);
+                return true;
+            }
             await runtime.applySuggestionViaServer({
                 endpoint: config.applySuggestionActionUrl,
                 workflowHandle: config.workflowHandle,
@@ -228,7 +367,13 @@
             return true;
         };
         const editorRoot = currentEditor(root)?.$container?.[0] || document;
-        const reviewModal = runtime.createReviewModal({ applySuggestion: applySuggestionServer, focusMatchedField: runtime.focusMatchedField, instanceId: config.instanceId, fieldRoot: editorRoot });
+        const rejectSuggestionServer = async (suggestion) => {
+            if (currentRun?.status === 'ready' && Number.isInteger(suggestion.index)) {
+                const data = await requestRun(config.decideRunActionUrl, { runId: currentRun.id, index: suggestion.index, accept: false });
+                updateRun(data.run);
+            }
+        };
+        const reviewModal = runtime.createReviewModal({ applySuggestion: applySuggestionServer, rejectSuggestion: rejectSuggestionServer, focusMatchedField: runtime.focusMatchedField, instanceId: config.instanceId, fieldRoot: editorRoot });
         const lockButton = async (button, callback) => {
             button.disabled = true;
             try { await callback(); }
@@ -236,16 +381,36 @@
                 reviewModal.clear();
                 statusMessage(root, error instanceof Error ? error.message : 'Could not complete Autofill request.');
             }
-            finally { button.disabled = false; }
+            finally { button.disabled = !!(currentRun && ['queued', 'running'].includes(currentRun.status)) || ((!!config.selectedRunId || config.canStart === false) && currentRun?.status !== 'ready'); }
         };
 
-        generateButton.addEventListener('click', () => lockButton(generateButton, () => saveFirst(
-            root,
-            config,
-            isTestMode ? 'preview' : 'generate',
-            { userPrompt: userPrompt() },
-            reviewModal,
-        )));
+        root.querySelector('[data-autofill-regenerate]')?.addEventListener('click', async () => {
+            if (!currentRun || !window.confirm('Generate new results using the current workflow and saved content? Existing applied values stay saved; pending results are retained in history.')) return;
+            try {
+                const data = await requestRun(config.regenerateRunActionUrl, { runId: currentRun.id });
+                updateRun(data.run);
+                window.Craft?.cp?.runQueue?.();
+            } catch (error) { statusMessage(root, error.message); }
+        });
+        root.querySelector('[data-autofill-cancel]')?.addEventListener('click', async () => {
+            if (!currentRun || !window.confirm('Dismiss this run? Applied values stay saved and run history is retained.')) return;
+            try {
+                const data = await requestRun(config.cancelRunActionUrl, { runId: currentRun.id });
+                updateRun(data.run);
+                statusMessage(root, 'Run dismissed. Applied values were kept.');
+            } catch (error) { statusMessage(root, error.message); }
+        });
+
+        generateButton.addEventListener('click', () => {
+            if (config.sidebar && isTestMode && currentRun?.status !== 'ready') setSidebarOpen(true);
+            return lockButton(generateButton, () => currentRun?.status === 'ready' ? root._autofillStart({}) : saveFirst(
+                root,
+                config,
+                isTestMode ? 'preview' : 'generate',
+                { userPrompt: userPrompt() },
+                reviewModal,
+            ));
+        });
 
         if (isTestMode && parseResponseButton instanceof HTMLButtonElement && responseInput instanceof HTMLTextAreaElement) {
             parseResponseButton.addEventListener('click', () => lockButton(parseResponseButton, () => saveFirst(
@@ -259,10 +424,15 @@
         const removalObserver = new MutationObserver(() => {
             if (root.isConnected) return;
             removalObserver.disconnect();
+            clearTimeout(pollTimer);
             reviewModal.destroy();
         });
         removalObserver.observe(document.documentElement, { childList: true, subtree: true });
         root.dataset.autofillInitialized = '1';
+        if (!isTestMode && Number(config.elementId)) {
+            requestRun(config.selectedRunId ? config.runStatusActionUrl : config.currentRunActionUrl, config.selectedRunId ? { runId: config.selectedRunId } : { workflowHandle: config.workflowHandle, elementId: Number(config.elementId), siteId: Number(config.siteId) || null })
+                .then(data => updateRun(data.run)).catch(error => statusMessage(root, error.message));
+        }
         restorePendingRun(root, config, reviewModal);
     };
 

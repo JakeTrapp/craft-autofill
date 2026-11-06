@@ -1,0 +1,29 @@
+<div class="readable">
+    {% if log.errorMessage %}<p class="error">{{ log.errorMessage }}</p>{% endif %}
+    <table class="data fullwidth">
+        <tbody>
+            {% for label, value in {
+                'Model configuration': log.modelConfigUid,
+                'Provider response ID': log.providerResponseId,
+                'Reasoning': log.reasoningEffort,
+                'Input tokens': log.inputTokens,
+                'Output tokens': log.outputTokens,
+                'Date updated': log.dateUpdated ? log.dateUpdated|date('Y-m-d H:i:s') : null,
+                'UID': log.uid,
+            } %}
+                <tr><th scope="row">{{ label|t('autofill') }}</th><td>{{ value is same as(null) or value is same as('') ? 'None'|t('app') : value }}</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% for label, value in {
+        'Request prompt': log.requestPrompt,
+        'Request payload JSON': log.requestPayloadJson,
+        'Response raw text': log.responseRawText,
+        'Response payload JSON': log.responsePayloadJson,
+    } %}
+        <div class="field">
+            <div class="heading"><h3>{{ label|t('autofill') }}</h3></div>
+            <div class="input"><textarea class="text fullwidth code" rows="6" readonly aria-label="{{ label|t('autofill') }}">{{ value ?? '' }}</textarea></div>
+        </div>
+    {% endfor %}
+</div>

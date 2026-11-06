@@ -1,0 +1,34 @@
+(() => {
+    if (window.autofillNotificationPolling) return;
+    window.autofillNotificationPolling = true;
+    const key = 'autofill:notification:{{ actorId }}';
+    const update = async () => {
+        if (document.hidden || !window.Craft?.sendActionRequest) return;
+        try {
+            const response = await Craft.sendActionRequest('POST', 'autofill/workflow-run/notifications');
+            const state = response.data;
+            if (!state.success) return;
+            let previous = null;
+            try { previous = JSON.parse(sessionStorage.getItem(key)); } catch (_) {}
+            if (previous && state.latestId > previous.latestId) Craft.cp.displayNotice('Autofill results are ready to review.');
+            sessionStorage.setItem(key, JSON.stringify({ latestId: Math.max(state.latestId, previous?.latestId || 0) }));
+            {% if isPro %}
+            const link = document.querySelector('#nav-autofill > a');
+            if (!link) return;
+            let badge = link.querySelector('.sidebar-action__badge');
+            if (!state.count) { badge?.remove(); return; }
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'sidebar-action__badge';
+                badge.innerHTML = '<span class="badge" aria-hidden="true"></span><span class="visually-hidden" data-notification></span>';
+                link.appendChild(badge);
+            }
+            badge.querySelector('.badge').textContent = String(state.count);
+            badge.querySelector('[data-notification]').textContent = `${state.count} Autofill items ready to review`;
+            {% endif %}
+        } catch (_) { /* Preserve existing UI during transient network failures. */ }
+    };
+    update();
+    setInterval(update, 15000);
+    document.addEventListener('visibilitychange', update);
+})();

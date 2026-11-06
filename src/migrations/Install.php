@@ -64,6 +64,7 @@ class Install extends Migration
                 'volumeUid' => $this->string(36),
                 'modelConfigUid' => $this->string(36),
                 'globalPrompt' => $this->text(),
+                'description' => $this->text(),
                 'actionButtonLabel' => $this->string(255),
                 'showUserPromptInput' => $this->boolean()->notNull()->defaultValue(true),
                 'showOnSidebar' => $this->boolean()->notNull()->defaultValue(false),
@@ -79,6 +80,8 @@ class Install extends Migration
             $this->createIndex(null, $workflowTable, ['volumeUid']);
         }
 
+        (new m261031_000000_workflow_runs())->safeUp();
+        (new m261101_000000_private_run_ownership())->safeUp();
         return true;
     }
 

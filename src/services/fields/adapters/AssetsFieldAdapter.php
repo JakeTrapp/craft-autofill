@@ -231,7 +231,7 @@ class AssetsFieldAdapter implements FieldAdapterInterface
             Craft::configure($query, $field->getInputSelectionCriteria());
             foreach ($query->all() as $asset) { $assetsById[(int)$asset->id] = $asset; }
         }
-        $user = Craft::$app->getRequest()->getIsConsoleRequest() ? null : Craft::$app->getUser()->getIdentity();
+        $user = Craft::$app->getUser()->getIdentity();
         return array_values(array_filter($assetsById, static function(mixed $asset) use ($user): bool {
             return $asset instanceof Asset && ($user === null || Craft::$app->getElements()->canView($asset, $user));
         }));

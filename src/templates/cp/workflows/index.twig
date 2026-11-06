@@ -1,15 +1,60 @@
 {% extends '_layouts/cp.twig' %}
 {% set title = 'Workflows'|t('autofill') %}
 {% set selectedSubnavItem = 'workflows' %}
-{% do view.registerAssetBundle('jtdev\\craftautofill\\web\\assets\\cp\\AutofillCpAsset') %}
-{% set options = {
-    screen: 'list', workflows: workflows,
-    newUrl: url('autofill/workflows/new'), editBaseUrl: url('autofill/workflows/edit'),
-    deleteUrl: actionUrl('autofill/workflows/delete'),
-} %}
+{% do view.registerAssetBundle('craft\\web\\assets\\admintable\\AdminTableAsset') %}
+
 {% block actionButton %}
-    <a class="btn submit" href="{{ url('autofill/workflows/new') }}">{{ 'New workflow'|t('autofill') }}</a>
+    {% if currentUser.admin or currentUser.can('autofill-create') %}
+        <a class="btn submit add icon" href="{{ url('autofill/workflows/new') }}">{{ 'New workflow'|t('autofill') }}</a>
+    {% endif %}
 {% endblock %}
+
+{% block sidebar %}
+    <nav aria-label="{{ 'Workflow view'|t('autofill') }}">
+        <ul>
+            <li><a href="{{ url('autofill/workflows', {}) }}"{% if not showArchived %} class="sel" aria-current="page"{% endif %}>{{ 'Active'|t('autofill') }}</a></li>
+            <li><a href="{{ url('autofill/workflows', {archived: 1}) }}"{% if showArchived %} class="sel" aria-current="page"{% endif %}>{{ 'Archived'|t('autofill') }}</a></li>
+        </ul>
+    </nav>
+{% endblock %}
+
 {% block content %}
-    <div data-autofill-vue-root data-screen="list" data-options="{{ options|json_encode|e('html_attr') }}"></div>
+    <div id="autofill-workflows-admin-table"></div>
 {% endblock %}
+
+{% set tableData = [] %}
+{% for workflow in workflows %}
+    {% set tableData = tableData|merge([{
+        id: workflow.id,
+        title: workflow.name,
+        url: url('autofill/workflows/edit/' ~ workflow.handle),
+        contentType: workflow.scope == 'asset' ? 'Assets'|t('app') : 'Entries'|t('app'),
+        scopeName: workflow.scope == 'asset' ? workflow.volumeName ?: 'Unavailable volume'|t('autofill') : workflow.entryTypeName ?: 'Unavailable entry type'|t('autofill'),
+        visibility: workflow.visibility == 'private' ? 'Private'|t('autofill') : 'Public'|t('autofill'),
+        owner: workflow.ownerName,
+        _showDelete: workflow.canDelete and not workflow.processing and not workflow.archived,
+    }]) %}
+{% endfor %}
+
+{% js %}
+    new Craft.VueAdminTable({
+        container: '#autofill-workflows-admin-table',
+        columns: [
+            {name: '__slot:title', title: {{ 'Workflow'|t('autofill')|json_encode|raw }}},
+            {name: 'contentType', title: {{ 'Content type'|t('autofill')|json_encode|raw }}, callback: Craft.escapeHtml},
+            {name: 'scopeName', title: {{ 'Entry type / volume'|t('autofill')|json_encode|raw }}, callback: Craft.escapeHtml},
+            {name: 'visibility', title: {{ 'Visibility'|t('autofill')|json_encode|raw }}, callback: Craft.escapeHtml},
+            {name: 'owner', title: {{ 'Owner'|t('autofill')|json_encode|raw }}, callback: Craft.escapeHtml},
+        ],
+        tableData: {{ tableData|json_encode|raw }},
+        search: true,
+        searchParams: ['title', 'contentType', 'scopeName', 'visibility', 'owner'],
+        itemLabels: {singular: {{ 'workflow'|t('autofill')|json_encode|raw }}, plural: {{ 'workflows'|t('autofill')|json_encode|raw }}},
+        emptyMessage: {{ (showArchived ? 'No archived workflows.' : 'No workflows yet.')|t('autofill')|json_encode|raw }},
+        {% if not showArchived %}
+        deleteAction: 'autofill/workflows/delete',
+        deleteConfirmationMessage: {{ 'Remove “{name}” from available workflows? Saved run history will be kept.'|t('autofill')|json_encode|raw }},
+        deleteSuccessMessage: {{ '“{name}” removed.'|t('autofill')|json_encode|raw }},
+        {% endif %}
+    });
+{% endjs %}

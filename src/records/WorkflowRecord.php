@@ -10,6 +10,7 @@ use craft\db\ActiveRecord;
  * @property int $id
  * @property string $handle
  * @property string $name
+ * @property string|null $description
  * @property string $scope
  * @property string|null $entryTypeUid
  * @property string|null $volumeUid

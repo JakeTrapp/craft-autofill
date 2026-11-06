@@ -1,5 +1,25 @@
 # Release Notes for Autofill
 ## Unreleased
+
+- Compacted sidebar workflows into expandable rows with always-visible Run/Review actions, accessible regenerate/dismiss icons, and grouped workflow names. Fixed unavailable actions remaining visible due to button styles overriding hidden attributes.
+- Fixed the workflow editor form being hidden after the native-table cleanup.
+- Switched the inbox and request logs to Craft's native Vue admin tables, with native search, log pagination/sorting and expandable request details.
+- Replaced the custom workflow list with Craft's native Vue admin table, including native search, row controls and layout.
+- Reorganized workflow tables into separate content type, entry type/volume, visibility and owner columns, using the full content width and shared search controls.
+- Simplified workflow setup by grouping access and advanced settings behind compact disclosures.
+- Added optional workflow descriptions to the content editor sidebar and bulk workflow cards. Bulk Autofill now shows each workflow's inputs, outputs, and review policy before you select content.
+- Changed inbox results to open their original entry or asset and launch review immediately, with inbox navigation in the editor sidebar.
+- Fixed closing an inbox review reopening the modal after the editor refreshes.
+- Added workflow ownership, private/public visibility, administrator-managed upgrade defaults, and separate workflow permissions.
+- Added durable background-run storage, single-run queue/status/review endpoints, and per-field review decisions for Lite and Pro.
+- Added processing edit locks, archived definitions with run history, and content-change checks before automatic application.
+- Added a Pro review inbox, workflow-based entry/asset bulk runs, review navigation, in-app ready notifications and actionable inbox counts.
+- Added regeneration and dismissal with retained history, ownership transfer, and recovery of pending results when definitions become private or archived.
+- Preserved private review ownership separately from the run initiator and kept private regeneration separate from existing public results.
+- Kept conflict warnings accurate when editors change a field after Autofill has already applied it.
+- Completed runs without opening a review when all generated values already match the saved content.
+- Unified legacy bulk/CLI calls with persistent review rules. CLI runs now require an initiating user; automatic bulk execution requires acknowledgement.
+- Restricted legacy request logs to administrators and checked field/asset metadata access before generation or review.
 - Moved generation definitions into live-editable, administrator-managed workflows with handle-based field references and automatic conversion of existing configurations.
 - Added a Vue and Verbb Plugin Kit workflow editor and list, independent sidebar controls, and a Plugin Kit suggestion review dialog.
 - Required saving editor changes before generation so Autofill uses persisted content.

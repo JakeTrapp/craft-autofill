@@ -189,6 +189,7 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
 
         $rows = [];
         foreach ($elements as $element) {
+            if ($element instanceof ElementInterface && !\jtdev\craftautofill\services\permissions\RelatedElementAccess::canRead($element)) continue;
             if (!$element instanceof ElementInterface) {
                 continue;
             }
@@ -270,6 +271,7 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
 
         $rows = [];
         foreach ($elements as $element) {
+            if ($element instanceof ElementInterface && !\jtdev\craftautofill\services\permissions\RelatedElementAccess::canRead($element)) continue;
             if (!$element instanceof ElementInterface || !is_numeric($element->id)) {
                 continue;
             }
@@ -318,6 +320,7 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
 
         $idsByLowerTitle = [];
         foreach ($elements as $element) {
+            if ($element instanceof ElementInterface && !\jtdev\craftautofill\services\permissions\RelatedElementAccess::canRead($element)) continue;
             if (!$element instanceof ElementInterface) {
                 continue;
             }
@@ -400,6 +403,7 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
             if (!$item instanceof ElementInterface) {
                 continue;
             }
+            if (!\jtdev\craftautofill\services\permissions\RelatedElementAccess::canRead($item)) throw new \RuntimeException('A related context item is unavailable to you.');
             $title = trim((string)($item->title ?? ''));
             if ($title !== '' && !in_array($title, $titles, true)) {
                 $titles[] = $title;

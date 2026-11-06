@@ -47,7 +47,7 @@
             const isVisible = (key) => visibleFields[key] !== false;
             const setValue = (key, value) => {
                 const element = host.querySelector(`[data-autofill-review-input="seomatic-${key}"]`);
-                if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement) {
+                if (element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
                     element.value = value;
                 }
             };
@@ -83,7 +83,7 @@
                 }
 
                 const element = host.querySelector(`[data-autofill-review-input="seomatic-${fieldKey}"]`);
-                if (element instanceof HTMLInputElement || element instanceof HTMLSelectElement) {
+                if (element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement) {
                     return element.value.trim();
                 }
                 return '';

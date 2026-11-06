@@ -19,9 +19,12 @@ class RunAutofillEntryJob extends BaseJob
 
     public function execute($queue): void
     {
-        AutofillPlugin::getInstance()
+        $result = AutofillPlugin::getInstance()
             ->getBulkAutofillService()
             ->runForEntry($this->fieldId, null, $this->entryId, $this->siteId, $this->userPrompt, $this->source, $this->initiatingUserId);
+        if (!$result['success'] && !isset($result['runId'])) {
+            throw new \RuntimeException(($result['error'] ?? 'This legacy Autofill job could not start.') . ' Requeue it with an active initiating user.');
+        }
     }
 
     protected function defaultDescription(): ?string

@@ -7,8 +7,13 @@ namespace jtdev\craftautofill\services\workflows;
 use Craft;
 use craft\base\Component;
 use craft\base\ElementInterface;
+use craft\base\FieldInterface;
 use craft\elements\Asset;
 use craft\elements\Entry;
+use craft\elements\User;
+use craft\fields\Addresses;
+use craft\helpers\DateTimeHelper;
+use craft\helpers\Json;
 use jtdev\craftautofill\AutofillPlugin;
 use jtdev\craftautofill\fields\AutofillField;
 use jtdev\craftautofill\models\Workflow;
@@ -32,6 +37,9 @@ class WorkflowRuntimeService extends Component
         }
         $this->assertScope($workflow, $element);
         $this->assertCanSave($element);
+        $actor = Craft::$app->getUser()->getIdentity();
+        if ($actor !== null) AutofillPlugin::getInstance()->getWorkflowAccess()->assertCanRun($workflow, $element, $actor);
+        elseif (!Craft::$app->getRequest()->getIsConsoleRequest()) throw new RuntimeException('Sign in to run workflows.');
         return [$workflow, AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow), $element];
     }
 
@@ -57,6 +65,11 @@ class WorkflowRuntimeService extends Component
             $workflow = AutofillPlugin::getInstance()->getWorkflowService()->getByHandle($field->workflowHandle);
             if ($workflow === null) { throw new RuntimeException('This workflow is unavailable.'); }
             $this->assertScope($workflow, $element);
+            $actor = Craft::$app->getUser()->getIdentity();
+            if ($actor !== null) {
+                AutofillPlugin::getInstance()->getWorkflowAccess()->assertCanRun($workflow, $element, $actor);
+                $this->definitionForActor(AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow), $element, $actor);
+            }
         } elseif ($field->entryTypeUid !== (string)$element->getType()->uid) {
             throw new RuntimeException('This workflow does not support this entry type.');
         }
@@ -86,17 +99,25 @@ class WorkflowRuntimeService extends Component
         }
     }
 
-    public function preview(AutofillField $definition, ElementInterface $element, string $userPrompt): string
+    public function preview(AutofillField $definition, ElementInterface $element, string $userPrompt, ?User $actor = null): string
     {
-        return AutofillPlugin::getInstance()->getAiService()->promptBuilder->buildForElementPrompt($userPrompt, $definition, $element);
+        $actor ??= Craft::$app->getUser()->getIdentity();
+        if ($actor !== null) $definition = $this->definitionForActor($definition, $element, $actor);
+        return $this->withActor($actor, fn(): string => AutofillPlugin::getInstance()->getAiService()->promptBuilder->buildForElementPrompt($userPrompt, $definition, $element));
     }
 
-    public function generate(AutofillField $definition, ElementInterface $element, string $userPrompt): array
+    public function generate(AutofillField $definition, ElementInterface $element, string $userPrompt, ?User $actor = null): array
+    {
+        return $this->withActor($actor, fn(): array => $this->generateForActor($definition, $element, $userPrompt, $actor));
+    }
+
+    private function generateForActor(AutofillField $definition, ElementInterface $element, string $userPrompt, ?User $actor = null): array
     {
         $plugin = AutofillPlugin::getInstance();
         $model = $this->modelForDefinition($definition);
-        $prompt = $this->preview($definition, $element, $userPrompt);
-        $inputs = (new AssetInputService())->collect($definition, $element);
+        if ($actor !== null) $definition = $this->definitionForActor($definition, $element, $actor);
+        $prompt = $this->preview($definition, $element, $userPrompt, $actor);
+        $inputs = (new AssetInputService())->collect($definition, $element, true, $actor);
         $request = $plugin->getAiService()->promptBuilder->buildGenerationRequest('', $prompt, $model, [
             'workflowHandle' => $definition->workflowHandle,
             'elementId' => (int)$element->id,
@@ -115,7 +136,7 @@ class WorkflowRuntimeService extends Component
             'fieldId' => $sourceFieldId,
             'entryId' => $element instanceof Entry ? (int)$element->id : null,
             'siteId' => $element->siteId,
-            'userId' => Craft::$app->getRequest()->getIsConsoleRequest() ? null : Craft::$app->getUser()->getId(),
+            'userId' => $actor?->id ?? (Craft::$app->getRequest()->getIsConsoleRequest() ? null : Craft::$app->getUser()->getId()),
             'provider' => $model->provider,
             'modelConfigUid' => $model->uid,
             'modelId' => $model->modelId,
@@ -167,8 +188,33 @@ class WorkflowRuntimeService extends Component
         throw new RuntimeException('The selected AI model configuration is missing or disabled.');
     }
 
+    private function withActor(?User $actor, callable $operation): mixed
+    {
+        $session = Craft::$app->getUser();
+        $previous = $session->getIdentity();
+        if ($actor === null || $actor === $previous) return $operation();
+        $session->setIdentity($actor);
+        try { return $operation(); }
+        finally { $session->setIdentity($previous); }
+    }
+
+    private function definitionForActor(AutofillField $definition, ElementInterface $element, User $actor): AutofillField
+    {
+        $workflow = new Workflow([
+            'scope' => $definition->scope, 'entryTypeUid' => $definition->entryTypeUid, 'volumeUid' => $definition->volumeUid,
+            'rows' => $definition->rows, 'contextRows' => $definition->contextRows,
+        ]);
+        $allowed = AutofillPlugin::getInstance()->getWorkflowRunService()->definitionForActor($workflow, $element, $actor);
+        $definition = clone $definition;
+        $definition->rows = $allowed->rows;
+        $definition->contextRows = $allowed->contextRows;
+        return $definition;
+    }
+
     public function normalize(string $raw, AutofillField $definition, ElementInterface $element): array
     {
+        $actor = Craft::$app->getUser()->getIdentity();
+        if ($actor !== null) $definition = $this->definitionForActor($definition, $element, $actor);
         $result = AutofillPlugin::getInstance()->getAiService()->responseNormalizer->normalizeForElement($raw, $definition, $element);
         if (!$result->success) {
             throw new RuntimeException($result->error ?? 'The response could not be read.');
@@ -176,9 +222,131 @@ class WorkflowRuntimeService extends Component
         return $result->suggestions;
     }
 
-    public function apply(AutofillField $definition, ElementInterface $element, array $suggestion): array
+    public function normalizePreview(string $raw, AutofillField $definition, ElementInterface $element): array
     {
-        $this->assertCanSave($element);
+        $suggestions = $this->normalize($raw, $definition, $element);
+        foreach ($suggestions as &$suggestion) {
+            if ($this->matchesSavedValue($element, $suggestion)) $suggestion['state'] = 'unchanged';
+        }
+        unset($suggestion);
+        return $suggestions;
+    }
+
+    public function apply(AutofillField $definition, ElementInterface $element, array $suggestion, ?User $actor = null): array
+    {
+        return $this->withActor($actor, fn(): array => $this->applyForActor($definition, $element, $suggestion, $actor));
+    }
+
+    public function matchesSavedValue(ElementInterface $element, array $suggestion, ?User $actor = null): bool
+    {
+        if (!empty($suggestion['validationErrors']) || !array_key_exists('value', $suggestion)) {
+            return false;
+        }
+
+        $uid = (string)($suggestion['targetFieldUid'] ?? '');
+        try {
+            if (str_starts_with($uid, '__native__:')) {
+                $handle = substr($uid, strlen('__native__:'));
+                $proposed = $this->nativeValueForSuggestion($element, $handle, $suggestion['value']);
+                $current = $element->getAttributes([$handle])[$handle] ?? null;
+                if ($proposed instanceof \DateTimeInterface && $current instanceof \DateTimeInterface) {
+                    return $proposed->getTimestamp() === $current->getTimestamp();
+                }
+                return $proposed === $current;
+            }
+
+            foreach ($element->getFieldLayout()?->getCustomFields() ?? [] as $field) {
+                if ((string)($field->layoutElement->uid ?? $field->uid) === $uid) {
+                    return $this->withActor($actor, fn(): bool => $this->matchesCustomField($element, $field, $suggestion['value']));
+                }
+            }
+        } catch (Throwable) {
+            // An uncertain comparison must leave the suggestion available for review.
+        }
+        return false;
+    }
+
+    private function matchesCustomField(ElementInterface $element, FieldInterface $field, mixed $value): bool
+    {
+        $adapter = AutofillPlugin::getInstance()->getFieldAdapterService()->getAdapterForField($field);
+        if ($adapter === null) return false;
+
+        $current = $element->getFieldValue($field->handle);
+        $before = $field->serializeValue($current, $element);
+        // Adapters prepare an assignment in memory. Use an isolated element so
+        // the comparison takes the same path as apply without saving content.
+        $candidate = clone $element;
+        $candidate->setFieldValue($field->handle, $current);
+        $assignment = $adapter->applySuggestionToEntry($field, $candidate, $value);
+        if ($field instanceof Addresses) {
+            // Normalizing address edits on a draft can create nested drafts.
+            // Only compare patches that retain the same existing IDs and order.
+            if (!is_array($before) || !is_array($assignment) || array_keys($before) !== array_keys($assignment)) return false;
+            foreach ($assignment as $id => $patch) {
+                if (!is_int($id)) return false;
+                foreach ($patch as $key => $item) {
+                    if (($before[$id][$key] ?? null) !== $item) return false;
+                }
+            }
+            return true;
+        }
+        $after = $field->serializeValue($candidate->getFieldValue($field->handle), $candidate);
+
+        return $this->comparableValue($before) === $this->comparableValue($after);
+    }
+
+    private function comparableValue(mixed $value): string
+    {
+        return Json::encode($this->sortObjectKeys(Json::decode(Json::encode($value), false)));
+    }
+
+    private function sortObjectKeys(mixed $value): mixed
+    {
+        if ($value instanceof \stdClass) {
+            $properties = get_object_vars($value);
+            ksort($properties, SORT_STRING);
+            return (object)array_map($this->sortObjectKeys(...), $properties);
+        }
+        return is_array($value) ? array_map($this->sortObjectKeys(...), $value) : $value;
+    }
+
+    private function nativeValueForSuggestion(ElementInterface $element, string $handle, mixed $value): mixed
+    {
+        $allowed = $element instanceof Asset ? ['title', 'alt'] : ['title', 'slug', 'enabled', 'postDate', 'expiryDate'];
+        if (!in_array($handle, $allowed, true)) {
+            throw new RuntimeException('This native property cannot be changed by this workflow.');
+        }
+        if (in_array($handle, ['postDate', 'expiryDate'], true)) {
+            $date = $value === null || $value === '' ? null : DateTimeHelper::toDateTime($value);
+            if ($date === false) throw new RuntimeException('The suggestion is not a valid date.');
+            return $date;
+        }
+        if ($handle === 'enabled') return filter_var($value, FILTER_VALIDATE_BOOLEAN);
+        if (!is_scalar($value) && $value !== null) throw new RuntimeException('The suggestion must be text.');
+        return $value === null ? null : trim((string)$value);
+    }
+
+    private function applyForActor(AutofillField $definition, ElementInterface $element, array $suggestion, ?User $actor = null): array
+    {
+        if ($actor !== null) {
+            if (!Craft::$app->getElements()->canView($element, $actor) || !Craft::$app->getElements()->canSave($element, $actor)) {
+                throw new RuntimeException('You do not have permission to change this content.');
+            }
+            $workflow = new Workflow(['scope' => $definition->scope, 'entryTypeUid' => $definition->entryTypeUid, 'volumeUid' => $definition->volumeUid]);
+            if (!AutofillPlugin::getInstance()->getWorkflowAccess()->canUseField($workflow, (string)($suggestion['targetFieldUid'] ?? ''), $actor, $element, true)) {
+                throw new RuntimeException('You cannot edit this output field.');
+            }
+        } else {
+            $this->assertCanSave($element);
+            $actor = Craft::$app->getUser()->getIdentity();
+            if ($actor !== null) {
+                $access = AutofillPlugin::getInstance()->getWorkflowAccess();
+                if (!$access->can($actor, 'review')) throw new RuntimeException('You do not have permission to apply suggestions.');
+                $workflow = AutofillPlugin::getInstance()->getWorkflowService()->getByHandle($definition->workflowHandle);
+                if ($workflow !== null && !$access->canView($workflow, $actor)) throw new RuntimeException('This workflow is unavailable.');
+                if (!$access->canUseField($workflow ?? new Workflow(['scope' => $definition->scope, 'entryTypeUid' => $definition->entryTypeUid, 'volumeUid' => $definition->volumeUid]), (string)($suggestion['targetFieldUid'] ?? ''), $actor, $element, true)) throw new RuntimeException('You cannot edit this output field.');
+            }
+        }
         if (!$element instanceof Entry && !$element instanceof Asset) {
             throw new RuntimeException('Unsupported content type.');
         }
@@ -196,26 +364,10 @@ class WorkflowRuntimeService extends Component
         $value = \jtdev\craftautofill\services\ai\SuggestionValueGuard::checked($definition, $element, $uid, $suggestion);
         if (str_starts_with($uid, '__native__:')) {
             $handle = substr($uid, strlen('__native__:'));
-            $allowed = $element instanceof Asset ? ['title', 'alt'] : ['title', 'slug', 'enabled', 'postDate', 'expiryDate'];
-            if (!in_array($handle, $allowed, true)) {
-                throw new RuntimeException('This native property cannot be changed by this workflow.');
-            }
+            $value = $this->nativeValueForSuggestion($element, $handle, $value);
             $current = $element->getAttributes([$handle])[$handle] ?? null;
             if (!($row['overrideCurrentValue'] ?? true) && $current !== null && $current !== '') {
                 throw new RuntimeException('This workflow preserves the existing field value.');
-            }
-            if (in_array($handle, ['postDate', 'expiryDate'], true)) {
-                $value = $value === null || $value === '' ? null : \craft\helpers\DateTimeHelper::toDateTime($value);
-                if ($value === false) {
-                    throw new RuntimeException('The suggestion is not a valid date.');
-                }
-            } elseif ($handle === 'enabled') {
-                $value = filter_var($value, FILTER_VALIDATE_BOOLEAN);
-            } else {
-                if (!is_scalar($value) && $value !== null) {
-                    throw new RuntimeException('The suggestion must be text.');
-                }
-                $value = $value === null ? null : trim((string)$value);
             }
             $element->setAttributes([$handle => $value], false);
         } else {

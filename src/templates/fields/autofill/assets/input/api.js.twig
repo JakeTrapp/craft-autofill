@@ -72,6 +72,8 @@
         return data.applied || null;
     };
 
+    runtime.runRequest = async (endpoint, payload) => postJson(endpoint, payload, 'Could not update the Autofill run.');
+
     runtime.fetchIconSvg = async ({ endpoint, icon }) => {
         const data = await postJson(
             endpoint,

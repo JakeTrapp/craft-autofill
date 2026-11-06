@@ -40,6 +40,8 @@ class m261028_000000_create_workflows extends Migration
             $this->createIndex(null, $tableName, ['volumeUid']);
         }
 
+        (new m261031_000000_workflow_runs())->safeUp();
+        (new m261105_000000_workflow_description())->safeUp();
         (new WorkflowService())->migrateLegacyFields();
         return true;
     }

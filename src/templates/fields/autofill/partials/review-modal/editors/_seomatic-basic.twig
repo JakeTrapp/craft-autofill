@@ -2,8 +2,9 @@
 
 <div class="autofill-review-editor-seomatic" data-autofill-review-input="seomatic-basic">
     <div data-autofill-review-field-wrap="seoTitle">
-        {{ forms.textField({
+        {{ forms.textareaField({
             label: 'SEO Title',
+            rows: 2,
             value: '',
             inputAttributes: {
                 data: {
@@ -32,8 +33,9 @@
     </div>
 
     <div data-autofill-review-field-wrap="seoDescription">
-        {{ forms.textField({
+        {{ forms.textareaField({
             label: 'SEO Description',
+            rows: 4,
             value: '',
             inputAttributes: {
                 data: {
@@ -44,8 +46,9 @@
     </div>
 
     <div data-autofill-review-field-wrap="seoKeywords">
-        {{ forms.textField({
+        {{ forms.textareaField({
             label: 'SEO Keywords',
+            rows: 2,
             value: '',
             inputAttributes: {
                 data: {

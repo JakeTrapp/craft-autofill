@@ -47,7 +47,7 @@ class AutofillPlugin extends Plugin
     public const EDITION_LITE = 'lite';
     public const EDITION_PRO = 'pro';
 
-    public string $schemaVersion = '2.0.0';
+    public string $schemaVersion = '2.1.2';
     public bool $hasCpSettings = true;
     public bool $hasCpSection = true;
 
@@ -63,6 +63,8 @@ class AutofillPlugin extends Plugin
     {
         return [
             'components' => [
+                'workflowRunService' => \jtdev\craftautofill\services\workflows\WorkflowRunService::class,
+                'workflowAccess' => \jtdev\craftautofill\services\permissions\WorkflowAccess::class,
                 'workflowService' => \jtdev\craftautofill\services\workflows\WorkflowService::class,
                 'workflowRuntimeService' => \jtdev\craftautofill\services\workflows\WorkflowRuntimeService::class,
                 'aiRequestLogService' => AiRequestLogService::class,
@@ -85,7 +87,15 @@ class AutofillPlugin extends Plugin
         // Any code that creates an element query or loads Twig should be deferred until
         // after Craft is fully initialized, to avoid conflicts with other plugins/modules
         Craft::$app->onInit(function() {
-            // ...
+            $request = Craft::$app->getRequest();
+            if (!$request->getIsConsoleRequest() && $request->getIsCpRequest() && !$request->getIsAjax()) {
+                $actor = Craft::$app->getUser()->getIdentity();
+                if ($actor && ($actor->admin || $actor->can('accessPlugin-autofill'))) {
+                    Craft::$app->getView()->registerJs(Craft::$app->getView()->renderTemplate('autofill/cp/_notifications.js', [
+                        'actorId' => (int)$actor->id, 'isPro' => $this->isProEdition(),
+                    ]));
+                }
+            }
         });
     }
 
@@ -103,6 +113,16 @@ class AutofillPlugin extends Plugin
             'plugin' => $this,
             'settings' => $settings,
         ]);
+    }
+
+    public function getWorkflowRunService(): \jtdev\craftautofill\services\workflows\WorkflowRunService
+    {
+        return $this->get('workflowRunService');
+    }
+
+    public function getWorkflowAccess(): \jtdev\craftautofill\services\permissions\WorkflowAccess
+    {
+        return $this->get('workflowAccess');
     }
 
     public function getWorkflowService(): \jtdev\craftautofill\services\workflows\WorkflowService
@@ -169,7 +189,17 @@ class AutofillPlugin extends Plugin
             ],
         ];
 
-        if (Craft::$app->getUser()->getIsAdmin()) {
+        $actor = Craft::$app->getUser()->getIdentity();
+        if ($this->isProEdition()) {
+            $readyCount = $actor ? $this->getWorkflowRunService()->actionableCount($actor) : 0;
+            $item['badgeCount'] = $readyCount;
+            $item['subnav'] = ['inbox' => ['label' => 'Inbox', 'url' => 'autofill/inbox', 'badgeCount' => $readyCount]] + $item['subnav'];
+        } else {
+            unset($item['subnav']['bulk']);
+        }
+        if ($actor && !$this->getWorkflowAccess()->can($actor, 'bulk')) unset($item['subnav']['bulk']);
+        if (!Craft::$app->getUser()->getIsAdmin()) unset($item['subnav']['logs']);
+        if (Craft::$app->getUser()->getIdentity() !== null) {
             $item['subnav'] = ['workflows' => ['label' => 'Workflows', 'url' => 'autofill/workflows']] + $item['subnav'];
         }
         return $item;
@@ -218,6 +248,14 @@ class AutofillPlugin extends Plugin
 
     private function attachEventHandlers(): void
     {
+        Event::on(\craft\services\UserPermissions::class, \craft\services\UserPermissions::EVENT_REGISTER_PERMISSIONS,
+            static function(\craft\events\RegisterUserPermissionsEvent $event): void {
+                $event->permissions[] = [
+                    'heading' => 'Autofill',
+                    'permissions' => \jtdev\craftautofill\services\permissions\WorkflowAccess::permissionDefinitions(),
+                ];
+            }
+        );
         Event::on(\craft\base\Element::class, \craft\base\Element::EVENT_DEFINE_SIDEBAR_HTML,
             static function(\craft\events\DefineHtmlEvent $event): void {
                 $element = $event->sender;
@@ -225,21 +263,68 @@ class AutofillPlugin extends Plugin
                     return;
                 }
                 $plugin = self::getInstance();
+                $actor = Craft::$app->getUser()->getIdentity();
+                if ($actor === null) return;
+                $rendered = [];
+                $sidebarHtml = '';
+                // Inbox links reopen the exact saved run on its original editor,
+                // even if the live workflow is archived or no longer attached.
+                $requestedRunId = (int)Craft::$app->getRequest()->getQueryParam('autofillRun', 0);
+                if ($requestedRunId && $element->id && Craft::$app->getDb()->tableExists(\jtdev\craftautofill\records\WorkflowRunRecord::tableName())) {
+                    $service = $plugin->getWorkflowRunService();
+                    $run = \jtdev\craftautofill\records\WorkflowRunRecord::findOne($requestedRunId);
+                    if ($run && (int)$run->elementId === (int)$element->id && (int)$run->siteId === (int)$element->siteId && $service->canView($run, $actor)) {
+                        $snapshot = new \jtdev\craftautofill\models\Workflow(\craft\helpers\Json::decode($run->definitionJson));
+                        $snapshot->showUserPromptInput = false;
+                        $rendered[$run->workflowId] = true;
+                        $sidebarHtml .= Craft::$app->getView()->renderTemplate('autofill/fields/autofill/input', [
+                            'field' => $plugin->getWorkflowService()->asField($snapshot), 'element' => $element,
+                            'sidebar' => true, 'workflowDescription' => $snapshot->description,
+                            'testMode' => false, 'selectedRunId' => (int)$run->id,
+                            'autoOpenReview' => true, 'inboxReview' => true,
+                            'nextReviewRunId' => $service->nextForReview($run, $actor)?->id,
+                        ]);
+                    }
+                }
                 foreach ($plugin->getWorkflowService()->getAll() as $workflow) {
-                    if (!$workflow->showOnSidebar) {
+                    if ($workflow->archived || isset($rendered[$workflow->id])) {
                         continue;
                     }
                     try {
                         $plugin->getWorkflowRuntimeService()->assertScope($workflow, $element);
                         $plugin->getWorkflowRuntimeService()->assertCanSave($element);
+                        $actor = Craft::$app->getUser()->getIdentity();
+                        if ($actor === null) continue;
+                        $plugin->getWorkflowAccess()->assertCanRun($workflow, $element, $actor);
                     } catch (\Throwable) {
                         continue;
                     }
+                    foreach ($element->getFieldLayout()?->getCustomFields() ?? [] as $inlineField) {
+                        if ($inlineField instanceof AutofillField && $inlineField->workflowHandle === $workflow->handle) $rendered[$workflow->id] = true;
+                    }
+                    if (!$workflow->showOnSidebar) continue;
+                    $rendered[$workflow->id] = true;
                     $field = $plugin->getWorkflowService()->asField($workflow);
-                    $event->html .= Craft::$app->getView()->renderTemplate('autofill/fields/autofill/input', [
+                    $sidebarHtml .= Craft::$app->getView()->renderTemplate('autofill/fields/autofill/input', [
                         'field' => $field, 'element' => $element, 'sidebar' => true,
-                        'testMode' => $plugin->getSettings()->testMode,
+                        'workflowDescription' => $workflow->description, 'testMode' => $plugin->getSettings()->testMode,
                     ]);
+                }
+                if ($element->id && Craft::$app->getDb()->tableExists(\jtdev\craftautofill\records\WorkflowRunRecord::tableName())) {
+                    foreach ($plugin->getWorkflowRunService()->pendingForElement((int)$element->id, (int)$element->siteId, $actor) as $run) {
+                        if (isset($rendered[$run->workflowId])) continue;
+                        $snapshot = new \jtdev\craftautofill\models\Workflow(\craft\helpers\Json::decode($run->definitionJson));
+                        $snapshot->showUserPromptInput = false;
+                        $rendered[$run->workflowId] = true;
+                        $sidebarHtml .= Craft::$app->getView()->renderTemplate('autofill/fields/autofill/input', [
+                            'field' => $plugin->getWorkflowService()->asField($snapshot), 'element' => $element,
+                            'sidebar' => true, 'workflowDescription' => $snapshot->description,
+                            'testMode' => false, 'selectedRunId' => (int)$run->id,
+                        ]);
+                    }
+                }
+                if ($sidebarHtml !== '') {
+                    $event->html .= Craft::$app->getView()->renderTemplate('autofill/cp/_sidebar', ['content' => $sidebarHtml]);
                 }
             }
         );
@@ -252,6 +337,8 @@ class AutofillPlugin extends Plugin
                 $event->rules['autofill/workflows/new'] = 'autofill/workflows/edit';
                 $event->rules['autofill/workflows/edit/<handle:[a-zA-Z][a-zA-Z0-9_-]*>'] = 'autofill/workflows/edit';
                 $event->rules['autofill/workflows/<handle:[a-zA-Z][a-zA-Z0-9_-]*>'] = 'autofill/workflows/edit';
+                $event->rules['autofill/inbox'] = 'autofill/inbox/index';
+                $event->rules['autofill/inbox/<runId:\d+>'] = 'autofill/inbox/review';
                 $event->rules['autofill/bulk'] = 'autofill/bulk/index';
                 $event->rules['autofill/logs'] = 'autofill/logs/index';
             }

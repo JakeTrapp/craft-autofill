@@ -17,6 +17,7 @@ class FieldSettingsController extends Controller
         $this->requireCpRequest();
         $this->requirePostRequest();
         $this->requireAcceptsJson();
+        $this->requirePermission('accessPlugin-autofill');
 
         try {
             $entryTypeUid = trim((string)Craft::$app->getRequest()->getBodyParam('entryTypeUid', ''));
@@ -36,11 +37,15 @@ class FieldSettingsController extends Controller
                 ]);
             }
 
+            $actor = Craft::$app->getUser()->getIdentity();
+            $workflow = new \jtdev\craftautofill\models\Workflow(['entryTypeUid' => $entryTypeUid]);
+            $access = AutofillPlugin::getInstance()->getWorkflowAccess();
+            if (!$access->canConfigureScope($workflow, $actor)) throw new \RuntimeException('This content scope is unavailable.');
             return $this->asJson([
                 'success' => true,
-                'fields' => AutofillPlugin::getInstance()
+                'fields' => array_values(array_filter(AutofillPlugin::getInstance()
                     ->getFieldDiscoveryService()
-                    ->getSupportedEntryTypeFields($entryType),
+                    ->getSupportedEntryTypeFields($entryType), fn(array $field): bool => $access->canUseField($workflow, (string)$field['uid'], $actor))),
             ]);
         } catch (Throwable $exception) {
             Craft::error($exception->getMessage(), __METHOD__);

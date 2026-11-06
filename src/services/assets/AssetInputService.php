@@ -26,6 +26,7 @@ class AssetInputService
      */
     public function collect(AutofillField $definition, ElementInterface $element, bool $includeContents = true, ?User $user = null): array
     {
+        $user ??= Craft::$app->getUser()->getIdentity();
         $files = [];
         $metadata = [];
         $seenAssetIds = [];
@@ -126,7 +127,7 @@ class AssetInputService
             $this->assertCanView($asset, $user);
             $descriptor = ['assetId' => (int)$asset->id];
             foreach ($selectedMetadata as $metadataKey) {
-                $descriptor[$metadataKey] = $this->metadataValue($asset, $metadataKey);
+                $descriptor[$metadataKey] = $this->metadataValue($asset, $metadataKey, $user);
             }
             $descriptors[] = $descriptor;
 
@@ -198,8 +199,16 @@ class AssetInputService
         return $selected;
     }
 
-    private function metadataValue(Asset $asset, string $key): mixed
+    private function metadataValue(Asset $asset, string $key, ?User $user = null): mixed
     {
+        $user ??= Craft::$app->getRequest()->getIsConsoleRequest() ? null : Craft::$app->getUser()->getIdentity();
+        $field = $asset->getFieldLayout()?->getFieldByHandle($key);
+        if ($field !== null && !in_array($key, ['title', 'filename', 'alt', 'altText', 'dateCreated', 'size'], true) && $user !== null) {
+            $scope = new \jtdev\craftautofill\models\Workflow(['scope' => 'asset', 'volumeUid' => (string)$asset->getVolume()->uid]);
+            if (!\jtdev\craftautofill\AutofillPlugin::getInstance()->getWorkflowAccess()->canUseField($scope, (string)($field->layoutElement->uid ?? $field->uid), $user, $asset)) {
+                throw new RuntimeException('A required asset metadata field is unavailable to you.');
+            }
+        }
         $value = match ($key) {
             'title' => $asset->title,
             'filename' => $asset->getFilename(),

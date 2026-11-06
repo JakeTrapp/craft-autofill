@@ -6,6 +6,8 @@ namespace jtdev\craftautofill\services\workflows;
 
 use Craft;
 use craft\base\Component;
+use craft\elements\User;
+use jtdev\craftautofill\records\WorkflowRunRecord;
 use jtdev\craftautofill\AutofillPlugin;
 use jtdev\craftautofill\fields\AutofillField;
 use jtdev\craftautofill\models\Workflow;
@@ -33,10 +35,23 @@ class WorkflowService extends Component
         return array_map(fn(WorkflowRecord $record): Workflow => $this->modelFromRecord($record), $records);
     }
 
-    public function saveWorkflow(Workflow $workflow, bool $allowLiteOverLimit = false): bool
+    public function saveWorkflow(Workflow $workflow, bool $allowLiteOverLimit = false, ?User $actor = null): bool
     {
+        $previous = $workflow->id !== null ? $this->getById($workflow->id) : null;
+        if ($previous !== null) $this->assertNotProcessing($previous);
+        if (!$allowLiteOverLimit) {
+            $actor ??= Craft::$app->getUser()->getIdentity();
+            if ($workflow->id === null && $actor !== null && $workflow->ownerId === null && !$workflow->adminManaged) $workflow->ownerId = (int)$actor->id;
+            if ($actor !== null) AutofillPlugin::getInstance()->getWorkflowAccess()->assertCanSave($workflow, $previous, $actor);
+            elseif (!Craft::$app->getRequest()->getIsConsoleRequest()) throw new RuntimeException('Sign in to change workflows.');
+        }
+        if ($workflow->ownerId !== null && $workflow->ownerId !== $previous?->ownerId) {
+            $owner = Craft::$app->getUsers()->getUserById($workflow->ownerId);
+            if (!$owner || $owner->getStatus() !== User::STATUS_ACTIVE) throw new RuntimeException('Choose an active workflow owner.');
+        }
         $workflow->handle = trim($workflow->handle);
         $workflow->name = trim($workflow->name);
+        $workflow->description = trim($workflow->description);
         $workflow->entryTypeUid = trim($workflow->entryTypeUid);
         $workflow->volumeUid = trim($workflow->volumeUid);
         $workflow->modelConfigUid = trim($workflow->modelConfigUid);
@@ -66,8 +81,13 @@ class WorkflowService extends Component
         }
 
         $record->setAttributes([
+            'ownerId' => $workflow->ownerId,
+            'visibility' => $workflow->visibility,
+            'adminManaged' => $workflow->adminManaged,
+            'archived' => $workflow->archived,
             'handle' => $workflow->handle,
             'name' => $workflow->name,
+            'description' => $workflow->description,
             'scope' => $workflow->scope,
             'entryTypeUid' => $workflow->scope === 'entry' ? $workflow->entryTypeUid : null,
             'volumeUid' => $workflow->scope === 'asset' ? $workflow->volumeUid : null,
@@ -94,6 +114,30 @@ class WorkflowService extends Component
         return true;
     }
 
+    public function getById(int $id): ?Workflow
+    {
+        $record = WorkflowRecord::findOne($id);
+        return $record instanceof WorkflowRecord ? $this->modelFromRecord($record) : null;
+    }
+
+    public function assertNotProcessing(Workflow $workflow): void
+    {
+        if ($workflow->id !== null && Craft::$app->getDb()->tableExists(WorkflowRunRecord::tableName()) &&
+            WorkflowRunRecord::find()->where(['workflowId' => $workflow->id, 'status' => ['queued', 'running']])->exists()) {
+            throw new RuntimeException('This workflow is processing. Wait for its runs to finish before changing it.');
+        }
+    }
+
+    public function setArchived(int $id, bool $archived): bool
+    {
+        $record = WorkflowRecord::findOne($id);
+        if (!$record instanceof WorkflowRecord) return false;
+
+        $this->assertNotProcessing($this->modelFromRecord($record));
+        $record->archived = $archived;
+        return $record->save(false);
+    }
+
     public function deleteWorkflow(Workflow|int $workflow): bool
     {
         $id = $workflow instanceof Workflow ? $workflow->id : $workflow;
@@ -101,8 +145,25 @@ class WorkflowService extends Component
             return false;
         }
 
+        $definition = $this->getById($id);
+        if ($definition === null) return false;
+        $this->assertNotProcessing($definition);
+        $actor = Craft::$app->getUser()->getIdentity();
+        if ($actor !== null && !$actor->admin) {
+            $access = AutofillPlugin::getInstance()->getWorkflowAccess();
+            if ($definition->adminManaged || !$access->canView($definition, $actor) ||
+                !$access->can($actor, $access->owns($definition, $actor) ? 'delete' : 'deleteOthers')) {
+                throw new RuntimeException('You do not have permission to archive this workflow.');
+            }
+        } elseif ($actor === null && !Craft::$app->getRequest()->getIsConsoleRequest()) {
+            throw new RuntimeException('Sign in to archive workflows.');
+        }
         $record = WorkflowRecord::findOne($id);
-        return $record instanceof WorkflowRecord && (bool)$record->delete();
+        if (WorkflowRunRecord::find()->where(['workflowId' => $id])->exists()) {
+            $record->archived = true;
+            return $record->save(false);
+        }
+        return (bool)$record->delete();
     }
 
     public function resolveForField(AutofillField $field): ?Workflow
@@ -154,6 +215,9 @@ class WorkflowService extends Component
             if (!$previous) {
                 $workflow->handle = $this->migrationHandleForField($field);
             }
+            $workflow->visibility = 'public';
+            $workflow->adminManaged = true;
+            $workflow->ownerId = null;
             $workflow->name = trim($field->name) !== '' ? $field->name : $workflow->handle;
 
             $transaction = Craft::$app->getDb()->beginTransaction();
@@ -207,6 +271,14 @@ class WorkflowService extends Component
                 if (!is_array($row)) {
                     $workflow->addError($attribute, 'Each configured row must be an object.');
                     continue;
+                }
+                foreach ($attribute === 'rows' ? ['requiresApproval', 'includeCurrentFieldValue', 'overrideCurrentValue', 'enabled'] : ['enabled'] as $flag) {
+                    if (array_key_exists($flag, $row) && !is_bool($row[$flag])) {
+                        $workflow->addError($attribute, 'Workflow behavior flags must be booleans.');
+                    }
+                }
+                if (isset($row['assets']['includeFile']) && !is_bool($row['assets']['includeFile'])) {
+                    $workflow->addError($attribute, 'File-content inclusion must be a boolean.');
                 }
                 $uid = trim((string)($row[$key] ?? ''));
                 if ($uid === '' || !isset($available[$uid])) {
@@ -277,10 +349,15 @@ class WorkflowService extends Component
     private function modelFromRecord(WorkflowRecord $record): Workflow
     {
         $workflow = new Workflow([
+            'ownerId' => $record->ownerId !== null ? (int)$record->ownerId : null,
+            'visibility' => (string)$record->visibility,
+            'adminManaged' => (bool)$record->adminManaged,
+            'archived' => (bool)$record->archived,
             'id' => (int)$record->id,
             'uid' => (string)$record->uid,
             'handle' => (string)$record->handle,
             'name' => (string)$record->name,
+            'description' => (string)$record->description,
             'scope' => (string)$record->scope,
             'entryTypeUid' => (string)($record->entryTypeUid ?? ''),
             'volumeUid' => (string)($record->volumeUid ?? ''),

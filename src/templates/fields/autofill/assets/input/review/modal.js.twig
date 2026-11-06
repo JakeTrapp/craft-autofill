@@ -3,7 +3,7 @@
     window.AutofillInputRuntime = window.AutofillInputRuntime || {};
     const runtime = window.AutofillInputRuntime;
 
-    runtime.createReviewModal = ({ applySuggestion, focusMatchedField, instanceId, fieldRoot = document }) => {
+    runtime.createReviewModal = ({ applySuggestion, rejectSuggestion, focusMatchedField, instanceId, fieldRoot = document }) => {
         let suggestions = [];
         let currentIndex = 0;
         let isLoading = false;
@@ -31,6 +31,7 @@
             errors: null,
             field: null,
             editor: null,
+            inspect: null,
         };
 
         const setModalDisplayMode = (mode) => {
@@ -59,6 +60,7 @@
             modalState.errors = modalState.modal.querySelector('[data-autofill-review-errors]');
             modalState.field = modalState.modal.querySelector('[data-autofill-review-field]');
             modalState.editor = modalState.modal.querySelector('[data-autofill-review-editor]');
+            modalState.inspect = modalState.modal.querySelector('[data-autofill-inspect]');
         }
 
         const hoistModalToBody = () => {
@@ -84,6 +86,16 @@
             });
         }
 
+        const setInspecting = (inspecting) => {
+            modalState.modal?.classList.toggle('is-inspecting', inspecting);
+            if (modalState.inspect instanceof HTMLElement) {
+                modalState.inspect.setAttribute('aria-expanded', String(!inspecting));
+                modalState.inspect.textContent = inspecting ? modalState.inspect.dataset.suggestionLabel : modalState.inspect.dataset.inspectLabel;
+            }
+            if (!inspecting && spotlightAnchor) placeReviewPanel(spotlightAnchor);
+            queueSpotlightRefresh();
+        };
+
         const teardown = () => {
             wantsOpen = false;
             if (modalState.backdrop instanceof HTMLElement) {
@@ -96,6 +108,7 @@
                 modalState.modal.hidden = true;
             }
             spotlightAnchor = null;
+            setInspecting(false);
             if (spotlightFrame !== null) {
                 window.cancelAnimationFrame(spotlightFrame);
                 spotlightFrame = null;
@@ -258,21 +271,10 @@
             clearSpotlight();
         };
 
-        const positionBelowField = (input) => {
-            if (!(modalState.modal instanceof HTMLElement)) {
-                return;
-            }
-
-            const anchor = runtime.getInteractionAnchor(input);
+        const placeReviewPanel = (anchor) => {
             const gap = 12;
             const viewportPadding = 12;
             const rect = anchor.getBoundingClientRect();
-            if (input.closest('[data-autofill-runtime]')) {
-                clearSpotlight();
-            } else {
-                spotlightAnchor = anchor;
-                setSpotlightForAnchor(anchor);
-            }
             const availableHeight = Math.max(160, window.innerHeight - (viewportPadding * 2));
             modalState.modal.style.setProperty('--autofill-review-max-height', `${availableHeight}px`);
 
@@ -289,6 +291,19 @@
             const maxTop = window.innerHeight - modalHeight - viewportPadding;
             const computedTop = Math.max(viewportPadding, Math.min(idealTop, maxTop));
             modalState.modal.style.setProperty('--autofill-review-top', `${computedTop}px`);
+        };
+
+        const positionBelowField = (input) => {
+            if (!(modalState.modal instanceof HTMLElement)) return;
+
+            const anchor = runtime.getInteractionAnchor(input);
+            if (input.closest('[data-autofill-runtime]')) {
+                clearSpotlight();
+            } else {
+                spotlightAnchor = anchor;
+                setSpotlightForAnchor(anchor);
+            }
+            if (!modalState.modal.classList.contains('is-inspecting')) placeReviewPanel(anchor);
         };
 
         const renderCurrent = () => {
@@ -331,6 +346,9 @@
             if (modalState.errors instanceof HTMLElement) {
                 if (validationErrors.length) {
                     modalState.errors.textContent = validationErrors.join(' ') + (readonly ? ' This result is read-only. Skip it or regenerate.' : ' Correct the value below, then check and apply.');
+                    modalState.errors.hidden = false;
+                } else if (current.applicationError) {
+                    modalState.errors.textContent = 'Automatic application failed: ' + current.applicationError;
                     modalState.errors.hidden = false;
                 } else {
                     modalState.errors.textContent = '';
@@ -405,6 +423,26 @@
 
             if (ownControl('[data-autofill-close]')) {
                 finishReview({ reloadPage: true });
+                return;
+            }
+
+            if (ownControl('[data-autofill-inspect]')) {
+                setInspecting(!modalState.modal.classList.contains('is-inspecting'));
+                return;
+            }
+
+            if (ownControl('[data-autofill-reject]')) {
+                const current = suggestions[currentIndex];
+                if (!current) return;
+                try {
+                    if (rejectSuggestion) await rejectSuggestion(current);
+                    suggestions.splice(currentIndex, 1);
+                    if (!suggestions.length) finishReview({ reloadPage: true });
+                    else { currentIndex = Math.min(currentIndex, suggestions.length - 1); renderCurrent(); }
+                } catch (error) {
+                    current.validationErrors = [...(current.validationErrors || []), error.message || 'Could not reject this result.'];
+                    renderCurrent();
+                }
                 return;
             }
 

@@ -10,8 +10,13 @@ class Workflow extends Model
 {
     public ?int $id = null;
     public string $uid = '';
+    public ?int $ownerId = null;
+    public string $visibility = 'private';
+    public bool $adminManaged = false;
+    public bool $archived = false;
     public string $handle = '';
     public string $name = '';
+    public string $description = '';
     public string $scope = 'entry';
     public string $entryTypeUid = '';
     public string $volumeUid = '';
@@ -31,8 +36,12 @@ class Workflow extends Model
     {
         return [
             [['handle', 'name', 'scope', 'entryTypeUid', 'volumeUid', 'modelConfigUid', 'globalPrompt', 'actionButtonLabel'], 'string'],
+            ['description', 'string', 'max' => 1000],
             [['handle', 'name', 'scope'], 'required'],
             [['id', 'uid'], 'safe'],
+            [['ownerId'], 'integer'],
+            [['visibility'], 'in', 'range' => ['private', 'public']],
+            [['adminManaged', 'archived'], 'boolean'],
             [['handle'], 'match', 'pattern' => '/^[a-zA-Z][a-zA-Z0-9_-]*$/'],
             [['scope'], 'in', 'range' => ['entry', 'asset']],
             [['showUserPromptInput', 'showOnSidebar'], 'boolean'],

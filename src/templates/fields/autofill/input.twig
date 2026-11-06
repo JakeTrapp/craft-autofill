@@ -1,7 +1,15 @@
 {% do view.registerAssetBundle('jtdev\\craftautofill\\web\\assets\\cp\\AutofillCpAsset') %}
 {% set autofillLauncherKey = 'autofill-' ~ (field.workflowHandle ?? 'missing') ~ '-' ~ (field.uid ?? field.id ?? 'sidebar') %}
 {% set autofillInstanceId = autofillLauncherKey ~ '-' ~ random(2147483647) %}
+{% set runtimePlugin = craft.app.plugins.getPlugin('autofill') %}
+{% set runtimeWorkflow = runtimePlugin.workflowService.getByHandle(field.workflowHandle ?? '') %}
+{% set canStartRun = currentUser and runtimeWorkflow and not runtimeWorkflow.archived and runtimePlugin.workflowAccess.canView(runtimeWorkflow, currentUser) and runtimePlugin.workflowAccess.can(currentUser, 'run') %}
 {% set previewConfig = {
+    canStart: canStartRun,
+    sidebar: sidebar ?? false,
+    workflowName: field.name ?: field.workflowHandle ?: 'Autofill workflow',
+    selectedRunId: selectedRunId ?? null,
+    autoOpenReview: autoOpenReview ?? false,
     workflowHandle: field.workflowHandle ?? '',
     elementId: element.id ?? null,
     siteId: element.siteId ?? null,
@@ -9,6 +17,12 @@
     testMode: testMode ?? true,
     instanceId: autofillInstanceId,
     promptPreviewActionUrl: actionUrl('autofill/workflow-run/preview'),
+    startRunActionUrl: actionUrl('autofill/workflow-run/start'),
+    currentRunActionUrl: actionUrl('autofill/workflow-run/current'),
+    runStatusActionUrl: actionUrl('autofill/workflow-run/status'),
+    regenerateRunActionUrl: actionUrl('autofill/workflow-run/regenerate'),
+    cancelRunActionUrl: actionUrl('autofill/workflow-run/cancel'),
+    decideRunActionUrl: actionUrl('autofill/workflow-run/decide'),
     generateSuggestionsActionUrl: actionUrl('autofill/workflow-run/generate'),
     responseNormalizeActionUrl: actionUrl('autofill/workflow-run/normalize'),
     applySuggestionActionUrl: actionUrl('autofill/workflow-run/apply'),
@@ -21,70 +35,67 @@
 {% set autofillDomId = autofillInstanceId %}
 {% set previewConfigJson = previewConfig|json_encode %}
 
-{% if sidebar ?? false %}
-    <h2 class="autofill-runtime__workflow-name">{{ field.name ?: field.workflowHandle ?: 'Autofill workflow' }}</h2>
-{% endif %}
-
+{% set isSidebar = sidebar ?? false %}
+{% macro actions(isSidebar, actionButtonLabel, workflowName) %}
+    <div class="{{ isSidebar ? 'autofill-sidebar-actions' : 'buttons' }}">
+        <button type="button" class="btn{{ isSidebar ? ' small' : ' submit' }}" data-autofill-generate{% if isSidebar %} aria-label="{{ actionButtonLabel }} {{ workflowName }}"{% endif %}>{{ actionButtonLabel }}</button>
+        <button type="button" class="btn{{ isSidebar ? ' small autofill-sidebar-icon' : '' }}" data-autofill-regenerate hidden aria-label="{{ isSidebar ? 'Regenerate results for {workflow}'|t('autofill', {workflow: workflowName}) : 'Regenerate results'|t('autofill') }}" title="{{ 'Regenerate results'|t('autofill') }}">
+            {% if isSidebar %}<span class="cp-icon" aria-hidden="true">{{ iconSvg('arrow-rotate-right') }}</span>{% else %}{{ 'Regenerate'|t('autofill') }}{% endif %}
+        </button>
+        <button type="button" class="btn{{ isSidebar ? ' small autofill-sidebar-icon' : '' }}" data-autofill-cancel hidden aria-label="{{ isSidebar ? 'Dismiss run for {workflow}'|t('autofill', {workflow: workflowName}) : 'Dismiss run'|t('autofill') }}" title="{{ 'Dismiss run'|t('autofill') }}">
+            {% if isSidebar %}<span class="cp-icon" aria-hidden="true">{{ iconSvg('xmark') }}</span>{% else %}{{ 'Dismiss run'|t('autofill') }}{% endif %}
+        </button>
+    </div>
+{% endmacro %}
+{% import _self as runtimeUi %}
 <div
-    class="autofill-runtime"
+    class="autofill-runtime{{ isSidebar ? ' autofill-runtime--sidebar' : '' }}"
     data-autofill-runtime
     data-autofill-instance-id="{{ autofillInstanceId }}"
     data-autofill-config="{{ previewConfigJson|e('html_attr') }}"
+    {% if isSidebar %}role="listitem"{% endif %}
 >
-    <div class="autofill-runtime__primary">
-        {% if showUserPromptInput %}
-            <div class="field">
-                <div class="input ltr">
-                    <textarea
-                        id="autofill-user-prompt-{{ autofillDomId }}"
-                        class="text fullwidth"
-                        rows="5"
-                        data-autofill-user-prompt
-                        placeholder="Type your request/context here..."
-                    ></textarea>
-                </div>
-            </div>
-        {% endif %}
-
-        <div class="buttons">
-            <button type="button" class="btn submit" data-autofill-generate>{{ actionButtonLabel }}</button>
+    {% if isSidebar %}
+        <div class="autofill-sidebar-row">
+            <button type="button" class="autofill-sidebar-name" data-autofill-toggle aria-expanded="false" aria-controls="{{ autofillDomId }}-body" title="{{ field.name ?: field.workflowHandle }}">
+                <span class="cp-icon autofill-sidebar-chevron" aria-hidden="true">{{ iconSvg('chevron-right') }}</span>
+                <span class="autofill-sidebar-name-text">{{ field.name ?: field.workflowHandle ?: 'Autofill workflow' }}</span>
+            </button>
+            {{ runtimeUi.actions(true, isTestMode ? 'Preview'|t('app') : 'Run'|t('autofill'), field.name ?: field.workflowHandle) }}
         </div>
-        <p class="autofill-runtime__status" data-autofill-run-status role="status" aria-live="polite" hidden></p>
-    </div>
-
-    {% if isTestMode %}
-        <div class="field">
-            <div class="heading">
-                <label>Built Prompt Preview</label>
-            </div>
-            <div class="input ltr">
-                <textarea class="text fullwidth code" rows="16" readonly data-autofill-preview placeholder="Preview appears here after clicking Generate."></textarea>
-            </div>
-        </div>
-
-        <div class="field">
-            <div class="heading">
-                <label for="autofill-response-input-{{ autofillDomId }}">Test Response Input</label>
-                <div class="instructions">
-                    <p>Paste AI JSON response here, then click Parse + Start Review.</p>
-                </div>
-            </div>
-            <div class="input ltr">
-                <textarea
-                    id="autofill-response-input-{{ autofillDomId }}"
-                    class="text fullwidth code"
-                    rows="8"
-                    data-autofill-response-input
-                    placeholder='[{"fieldName":"Phone Number","value":"555-123-4567"}]'
-                ></textarea>
-            </div>
-        </div>
-
-        <div class="buttons">
-            <button type="button" class="btn" data-autofill-parse-response>Parse + Start Review</button>
-        </div>
+        <p class="autofill-sidebar-state" data-autofill-sidebar-state role="status" aria-live="polite" hidden></p>
     {% endif %}
-
+    <div class="autofill-runtime__body"{% if isSidebar %} id="{{ autofillDomId }}-body" data-autofill-sidebar-body hidden{% endif %}>
+        <div class="autofill-runtime__primary">
+            {% if inboxReview ?? false %}
+                <p class="autofill-sidebar-review-links"><a href="{{ url('autofill/inbox') }}">{{ 'Back to inbox'|t('autofill') }}</a>{% if nextReviewRunId ?? null %} · <a href="{{ url('autofill/inbox/' ~ nextReviewRunId) }}">{{ 'Review next item'|t('autofill') }}</a>{% endif %}</p>
+            {% endif %}
+            {% if isSidebar and workflowDescription|default('') %}
+                <p class="autofill-sidebar-description">{{ workflowDescription|e }}</p>
+            {% endif %}
+            {% if showUserPromptInput %}
+                <div class="field">
+                    {% if isSidebar %}<div class="heading"><label for="autofill-user-prompt-{{ autofillDomId }}">{{ 'Additional instructions'|t('autofill') }}</label></div>{% endif %}
+                    <div class="input ltr">
+                        <textarea id="autofill-user-prompt-{{ autofillDomId }}" class="text fullwidth" rows="{{ isSidebar ? 3 : 5 }}" data-autofill-user-prompt placeholder="{{ isSidebar ? 'Optional instructions for this run'|t('autofill') : 'Type your request/context here...'|t('autofill') }}"></textarea>
+                    </div>
+                </div>
+            {% endif %}
+            {% if not isSidebar %}{{ runtimeUi.actions(false, actionButtonLabel, field.name ?: field.workflowHandle) }}{% endif %}
+            <p class="autofill-runtime__status" data-autofill-run-status role="status" aria-live="polite" hidden></p>
+        </div>
+        {% if isTestMode %}
+            <div class="field">
+                <div class="heading"><label>{{ 'Built Prompt Preview'|t('autofill') }}</label></div>
+                <div class="input ltr"><textarea class="text fullwidth code" rows="{{ isSidebar ? 6 : 16 }}" readonly data-autofill-preview placeholder="Preview appears here after clicking Generate."></textarea></div>
+            </div>
+            <div class="field">
+                <div class="heading"><label for="autofill-response-input-{{ autofillDomId }}">{{ 'Test Response Input'|t('autofill') }}</label></div>
+                <div class="input ltr"><textarea id="autofill-response-input-{{ autofillDomId }}" class="text fullwidth code" rows="{{ isSidebar ? 4 : 8 }}" data-autofill-response-input placeholder='[{"fieldName":"Phone Number","value":"555-123-4567"}]'></textarea></div>
+            </div>
+            <div class="buttons"><button type="button" class="btn" data-autofill-parse-response>{{ 'Parse + Start Review'|t('autofill') }}</button></div>
+        {% endif %}
+    </div>
 </div>
 
 {% include 'autofill/fields/autofill/partials/_review-modal.twig' with {
@@ -109,11 +120,53 @@
     margin-top: 0;
 }
 
+.autofill-runtime [hidden] { display: none !important; }
+.autofill-sidebar { margin: 20px 0; }
+.autofill-sidebar h2 {
+    margin: 0;
+    padding-block: 12px 8px;
+    border-bottom: 1px solid var(--gray-200, #dce2e8);
+}
+.autofill-runtime--sidebar { margin: 0; padding: 8px 0; }
+.autofill-runtime--sidebar ~ .autofill-runtime--sidebar { border-top: 1px solid var(--gray-200, #dce2e8); }
+.autofill-sidebar-row { display: flex; align-items: center; gap: 8px; }
+.autofill-sidebar-name { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1; padding: 5px 0; border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; font-weight: 600; text-align: start; cursor: pointer; }
+.autofill-sidebar-name-text { min-width: 0; overflow-wrap: anywhere; }
+.autofill-sidebar-chevron { flex: 0 0 9px; width: 9px; height: 9px; color: var(--gray-500, #647284); transition: transform .15s; }
+.autofill-sidebar-chevron svg { display: block; width: 100%; height: 100%; }
+.autofill-sidebar-name[aria-expanded="true"] .autofill-sidebar-chevron { transform: rotate(90deg); }
+.autofill-sidebar-name:hover { color: var(--link-color, #25638d); }
+.autofill-sidebar-name:focus-visible { outline: 2px solid var(--focus-color, #25638d); outline-offset: 2px; border-radius: 3px; }
+.autofill-sidebar-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.autofill-sidebar-actions .btn { min-height: 30px; padding: 5px 9px; font-size: 12px; }
+.autofill-sidebar-actions [data-autofill-generate]:not(.submit, :disabled) {
+    --button-bg: var(--teal-700, #0f766e);
+    --button-bg--hover: var(--teal-800, #115e59);
+    --button-bg--active: var(--teal-900, #134e4a);
+    color: #fff;
+}
+.autofill-sidebar-description { margin: 0; font-size: 12px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.autofill-sidebar-description + .field { padding-top: 8px; }
+.autofill-sidebar-actions .autofill-sidebar-icon { width: 27px; padding: 5px; background: transparent; box-shadow: none; }
+.autofill-sidebar-icon .cp-icon { display: block; width: 13px; height: 13px; }
+.autofill-sidebar-icon svg { width: 100%; height: 100%; }
+.autofill-sidebar-actions .autofill-sidebar-icon:hover { background: var(--gray-150, #e8edf2); }
+.autofill-runtime--sidebar .autofill-runtime__body { padding: 12px 0 2px 16px; }
+.autofill-runtime--sidebar .autofill-runtime__body > .field { margin-top: 14px; }
+.autofill-runtime--sidebar .autofill-runtime__body .field { margin: 0 !important; }
+.autofill-runtime--sidebar .autofill-runtime__body .heading label { font-size: 12px; }
+.autofill-sidebar-state { font-size: 11px; color: var(--gray-500, #647284); margin: 3px 0 0 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.autofill-runtime--sidebar[data-autofill-run-state="failed"] .autofill-sidebar-state { color: var(--error-color, #b32323); }
+.autofill-sidebar-review-links, .autofill-runtime--sidebar .autofill-runtime__status { font-size: 12px; line-height: 1.5; }
+.autofill-sidebar-review-links { margin: 0 0 8px; }
+@media (prefers-reduced-motion: reduce) { .autofill-sidebar-chevron { transition: none; } }
+
 .autofill-review-modal-backdrop {
     position: fixed;
     inset: 0;
     background: transparent;
     z-index: 9997;
+    pointer-events: none;
 }
 
 .autofill-review-modal-backdrop::before {
@@ -156,6 +209,29 @@
     padding: 0;
 }
 
+.autofill-review-modal.is-inspecting::part(panel) {
+    inset: auto 0 12px;
+}
+
+.autofill-review-modal.is-inspecting::part(body) {
+    display: none;
+}
+
+.autofill-review-modal.is-inspecting .autofill-review-modal__header {
+    padding-block: 8px;
+}
+
+.autofill-review-modal.is-inspecting .autofill-review-modal__buttons {
+    padding-block: 0;
+}
+
+/* Leave room to scroll even the last field above the docked review controls. */
+body:has(.autofill-review-modal.is-inspecting:not([hidden]))::after {
+    content: "";
+    display: block;
+    block-size: 10rem;
+}
+
 .autofill-review-modal__header {
     display: flex;
     align-items: baseline;
@@ -183,9 +259,8 @@
 .autofill-review-modal__body {
     display: grid;
     gap: 10px;
-    max-height: calc(100vh - 210px);
-    overflow: auto;
     padding: 8px 20px;
+    overflow-wrap: anywhere;
 }
 
 .autofill-review-modal__loading {
@@ -487,6 +562,10 @@
     margin: 0;
 }
 
+.autofill-review-modal [data-autofill-review-editor] .autofill-review-editor-seomatic textarea {
+    field-sizing: content;
+}
+
 .autofill-review-table {
     display: grid;
     gap: 10px;
@@ -567,7 +646,8 @@
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
-    padding: 12px 20px 18px;
+    width: 100%;
+    padding-block: 4px;
 }
 
 .autofill-review-modal__buttons [data-autofill-close] {

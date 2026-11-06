@@ -47,10 +47,19 @@ Release archives exclude test sources and the generated site. Composer consumers
 
 ## Workflows
 
-Administrators manage configurations under **Autofill → Workflows**. Each workflow targets one entry type or asset volume and defines output instructions, read-only context, model selection, and review rules. Workflow definitions stay in the site's database and can be edited on the live site.
+Administrators and permitted editors manage configurations under **Autofill → Workflows**. Each workflow targets one entry type or asset volume and defines output instructions, read-only context, model selection, and review rules. Workflow definitions stay in the site's database and can be edited on the live site.
 
 Autofill fields reference a workflow by handle. You can deploy a field before its workflow exists: its control appears when a matching workflow is created. A workflow may also appear in the editor sidebar independently of inline fields. Lite supports one workflow.
 
 Existing field configurations are converted through Craft's normal plugin migration process. Original settings are retained in the workflow table as migration snapshots. Back up the database and project config before deploying an update, as with other Craft schema changes.
 
 Images and supported document files come from existing Craft assets. Select metadata and optional file content in the workflow's context rows. Configuring an asset workflow lets you generate that asset's configured fields, such as alt text or a caption. Using attached assets as context does not modify them.
+
+
+## Background runs and review
+
+Both editions generate through Craft's queue. The editor button shows progress and restores saved results for review when the content is reopened. Pro adds a review inbox and workflow-based bulk generation for entries and assets. Automatic outputs apply independently while review-required outputs remain pending.
+
+New workflows are private by default. Public workflows and runs are shared within Craft permissions; private runs remain restricted to their initiator and administrators. Separate permissions control creation, editing, running, reviewing and configuring automatic application. Existing upgraded workflows are public and administrator-managed.
+
+See [the unreleased upgrade notes](UPGRADING.md) for migration, queue setup, permission changes, Lite/Pro boundaries and CLI compatibility.

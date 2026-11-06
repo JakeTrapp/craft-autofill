@@ -78,6 +78,7 @@ class AutofillFieldConfigBuilder extends Component
             $rowPromptConfigByUid[$targetUid] = $row;
         }
 
+        $contextUids = array_fill_keys(array_column(array_filter($field->contextRows, static fn(array $row): bool => $row['enabled'] ?? true), 'fieldUid'), true);
         if ($entry instanceof Entry) {
             foreach (array_keys($rowPromptConfigByUid) as $targetUid) {
                 $rowPromptConfigByUid[$targetUid]['entryId'] = (int)$entry->id;
@@ -98,6 +99,7 @@ class AutofillFieldConfigBuilder extends Component
                     continue;
                 }
 
+                if (!isset($rowPromptConfigByUid[$uid]) && !isset($contextUids[$uid])) continue;
                 $adapter = $adapterService->getAdapterForField($layoutField);
                 if ($adapter === null) {
                     continue;
@@ -108,7 +110,8 @@ class AutofillFieldConfigBuilder extends Component
                 $fieldHandleByUid[$uid] = (string)($layoutField->handle ?? '');
                 $fieldAdapterKeyByUid[$uid] = $adapter->getKey();
                 $rawValue = $this->resolveCustomFieldRawValue($entry, $layoutField->handle ?? '');
-                $contextValueByUid[$uid] = $this->resolveCustomFieldContextValue($rawValue, $layoutField, $adapter);
+                $readCurrent = isset($contextUids[$uid]) || ($rowPromptConfigByUid[$uid]['includeCurrentFieldValue'] ?? true) || $this->relatedForceUseCurrentValues($rowPromptConfigByUid[$uid] ?? []);
+                $contextValueByUid[$uid] = $readCurrent ? $this->resolveCustomFieldContextValue($rawValue, $layoutField, $adapter) : ($layoutField->isValueEmpty($rawValue, $entry) ? '' : '(existing value)');
                 if (
                     $adapter instanceof AbstractRelatedElementsFieldAdapter &&
                     $this->relatedForceUseCurrentValues($rowPromptConfigByUid[$uid] ?? [])

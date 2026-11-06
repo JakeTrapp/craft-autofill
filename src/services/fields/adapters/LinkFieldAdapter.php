@@ -200,6 +200,8 @@ class LinkFieldAdapter implements FieldAdapterInterface
     public function getContextValue(FieldInterface $field, mixed $value, array $options = []): string
     {
         if ($value instanceof LinkData) {
+            $linked = $value->getElement();
+            if ($linked !== null && !\jtdev\craftautofill\services\permissions\RelatedElementAccess::canRead($linked)) throw new \RuntimeException('A linked context item is unavailable to you.');
             $serialized = $value->serialize();
             $serialized['url'] = $value->getUrl();
             return json_encode($serialized, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: '';
@@ -622,6 +624,7 @@ class LinkFieldAdapter implements FieldAdapterInterface
 
         $rows = [];
         foreach ($elements as $element) {
+            if ($element instanceof ElementInterface && !\jtdev\craftautofill\services\permissions\RelatedElementAccess::canRead($element)) continue;
             if (!$element instanceof ElementInterface || !is_numeric($element->id) || !isset($rankById[(int)$element->id])) {
                 continue;
             }
@@ -687,6 +690,7 @@ class LinkFieldAdapter implements FieldAdapterInterface
 
         $rows = [];
         foreach ($elements as $element) {
+            if ($element instanceof ElementInterface && !\jtdev\craftautofill\services\permissions\RelatedElementAccess::canRead($element)) continue;
             if (!$element instanceof ElementInterface) {
                 continue;
             }
@@ -719,6 +723,7 @@ class LinkFieldAdapter implements FieldAdapterInterface
 
         $rows = [];
         foreach ($elements as $element) {
+            if ($element instanceof ElementInterface && !\jtdev\craftautofill\services\permissions\RelatedElementAccess::canRead($element)) continue;
             if (!$element instanceof ElementInterface) {
                 continue;
             }
@@ -944,6 +949,7 @@ class LinkFieldAdapter implements FieldAdapterInterface
 
         $matchedKeys = [];
         foreach ($elements as $element) {
+            if ($element instanceof ElementInterface && !\jtdev\craftautofill\services\permissions\RelatedElementAccess::canRead($element)) continue;
             if (!$element instanceof ElementInterface) {
                 continue;
             }

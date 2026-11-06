@@ -25,24 +25,25 @@ class WorkflowsController extends Controller
         $this->requirePermission('accessPlugin-autofill');
 
         return $this->redirect(UrlHelper::cpUrl(
-            Craft::$app->getUser()->getIsAdmin() ? 'autofill/workflows' : 'autofill/bulk',
+            'autofill/workflows',
         ));
     }
 
     public function actionIndex(): Response
     {
         $this->requireCpRequest();
-        $this->requireAdmin(false);
+        $this->requirePermission('accessPlugin-autofill');
 
         return $this->renderTemplate('autofill/cp/workflows/index', [
             'workflows' => $this->workflowList(),
+            'showArchived' => (bool)Craft::$app->getRequest()->getQueryParam('archived', false),
         ]);
     }
 
     public function actionEdit(?string $handle = null): Response
     {
         $this->requireCpRequest();
-        $this->requireAdmin(false);
+        $this->requirePermission('accessPlugin-autofill');
         $workflow = trim((string)$handle) !== ''
             ? AutofillPlugin::getInstance()->getWorkflowService()->getByHandle((string)$handle)
             : null;
@@ -52,14 +53,20 @@ class WorkflowsController extends Controller
         }
 
         if (!$workflow instanceof Workflow) {
-            $workflow = new Workflow();
+            $workflow = new Workflow(['ownerId' => (int)Craft::$app->getUser()->getId()]);
         }
 
+        $actor = Craft::$app->getUser()->getIdentity();
+        $access = AutofillPlugin::getInstance()->getWorkflowAccess();
+        if ($workflow->id === null ? !$access->can($actor, 'create') : !$access->canView($workflow, $actor)) {
+            throw new \yii\web\ForbiddenHttpException('This workflow is unavailable.');
+        }
         return $this->renderTemplate('autofill/cp/workflows/edit', [
             'workflow' => $this->workflowPayload($workflow),
             'entryTypes' => $this->entryTypeOptions(),
             'volumes' => $this->volumeOptions(),
             'modelConfigs' => $this->modelConfigOptions(),
+            'isAdmin' => (bool)$actor->admin,
         ]);
     }
 
@@ -68,7 +75,18 @@ class WorkflowsController extends Controller
      */
     private function fieldPickerOptions(array $fields): array
     {
-        return array_map(static function(array $field): array {
+        $body = Craft::$app->getRequest()->getBodyParams();
+        $workflow = new Workflow([
+            'scope' => (string)($body['scope'] ?? 'entry'),
+            'entryTypeUid' => (string)($body['entryTypeUid'] ?? ''),
+            'volumeUid' => (string)($body['volumeUid'] ?? ''),
+        ]);
+        $access = AutofillPlugin::getInstance()->getWorkflowAccess();
+        $actor = Craft::$app->getUser()->getIdentity();
+        if (!$access->canConfigureScope($workflow, $actor)) return [];
+        $fields = array_values(array_filter($fields, fn(array $field): bool => $access->canUseField($workflow, (string)$field['uid'], $actor)));
+        return array_map(static function(array $field) use ($access, $workflow, $actor): array {
+            $field['contextOnly'] = ($field['contextOnly'] ?? false) || !$access->canUseField($workflow, (string)$field['uid'], $actor, write: true);
             $field['iconSvg'] ??= Cp::iconSvg(match ($field['adapter'] ?? '') {
                 'date', 'time' => 'calendar',
                 'lightswitch' => 'toggle-on',
@@ -84,7 +102,7 @@ class WorkflowsController extends Controller
         $this->requireCpRequest();
         $this->requirePostRequest();
         $this->requireAcceptsJson();
-        $this->requireAdmin(false);
+        $this->requirePermission('accessPlugin-autofill');
 
         try {
             $body = Craft::$app->getRequest()->getBodyParams();
@@ -123,7 +141,7 @@ class WorkflowsController extends Controller
         $this->requireCpRequest();
         $this->requirePostRequest();
         $this->requireAcceptsJson();
-        $this->requireAdmin(false);
+        $this->requirePermission('accessPlugin-autofill');
 
         $payload = Craft::$app->getRequest()->getBodyParam('workflow');
         if (!is_array($payload)) {
@@ -146,7 +164,7 @@ class WorkflowsController extends Controller
             $workflow = new Workflow();
         }
 
-        foreach (['handle', 'name', 'scope', 'entryTypeUid', 'volumeUid', 'modelConfigUid', 'globalPrompt', 'actionButtonLabel'] as $attribute) {
+        foreach (['visibility', 'handle', 'name', 'description', 'scope', 'entryTypeUid', 'volumeUid', 'modelConfigUid', 'globalPrompt', 'actionButtonLabel'] as $attribute) {
             if (array_key_exists($attribute, $payload)) {
                 $workflow->$attribute = is_scalar($payload[$attribute]) ? (string)$payload[$attribute] : '';
             }
@@ -160,7 +178,7 @@ class WorkflowsController extends Controller
             $saved = AutofillPlugin::getInstance()->getWorkflowService()->saveWorkflow($workflow);
         } catch (Throwable $exception) {
             Craft::error($exception->getMessage(), __METHOD__);
-            return $this->asJson(['success' => false, 'error' => 'Could not save this workflow.']);
+            return $this->asJson(['success' => false, 'error' => $exception instanceof \RuntimeException ? $exception->getMessage() : 'Could not save this workflow.']);
         }
 
         if (!$saved) {
@@ -178,17 +196,43 @@ class WorkflowsController extends Controller
         ]);
     }
 
-    public function actionDelete(): Response
+    public function actionSetArchived(): Response
     {
         $this->requireCpRequest();
         $this->requirePostRequest();
         $this->requireAcceptsJson();
         $this->requireAdmin(false);
+
+        $id = filter_var(Craft::$app->getRequest()->getBodyParam('id'), FILTER_VALIDATE_INT);
+        $archived = Craft::$app->getRequest()->getBodyParam('archived');
+        if ($id === false || $id <= 0 || !is_bool($archived)) {
+            return $this->asJson(['success' => false, 'error' => 'Invalid workflow archive request.']);
+        }
+
+        try {
+            if (!AutofillPlugin::getInstance()->getWorkflowService()->setArchived($id, $archived)) {
+                return $this->asJson(['success' => false, 'error' => 'Could not change the workflow archive status.']);
+            }
+        } catch (\RuntimeException $exception) {
+            return $this->asJson(['success' => false, 'error' => $exception->getMessage()]);
+        }
+
+        return $this->asJson(['success' => true, 'archived' => $archived]);
+    }
+
+    public function actionDelete(): Response
+    {
+        $this->requireCpRequest();
+        $this->requirePostRequest();
+        $this->requireAcceptsJson();
+        $this->requirePermission('accessPlugin-autofill');
         $id = filter_var(Craft::$app->getRequest()->getBodyParam('id'), FILTER_VALIDATE_INT);
         if ($id === false || $id <= 0) {
+            Craft::$app->getResponse()->setStatusCode(400);
             return $this->asJson(['success' => false, 'error' => 'Workflow ID was invalid.']);
         }
         if (!AutofillPlugin::getInstance()->getWorkflowService()->deleteWorkflow((int)$id)) {
+            Craft::$app->getResponse()->setStatusCode(400);
             return $this->asJson(['success' => false, 'error' => 'Workflow could not be deleted.']);
         }
         return $this->asJson(['success' => true]);
@@ -205,13 +249,22 @@ class WorkflowsController extends Controller
             $row['entryTypeName'] = $entryTypes[$workflow->entryTypeUid] ?? '';
             $row['volumeName'] = $volumes[$workflow->volumeUid] ?? '';
             return $row;
-        }, AutofillPlugin::getInstance()->getWorkflowService()->getAll());
+        }, array_values(array_filter(AutofillPlugin::getInstance()->getWorkflowService()->getAll(), fn(Workflow $workflow): bool => $workflow->archived === (bool)Craft::$app->getRequest()->getQueryParam('archived', false) && AutofillPlugin::getInstance()->getWorkflowAccess()->canView($workflow, Craft::$app->getUser()->getIdentity()))));
     }
 
     private function workflowPayload(Workflow $workflow): array
     {
+        $actor = Craft::$app->getUser()->getIdentity();
+        $access = AutofillPlugin::getInstance()->getWorkflowAccess();
         return [
+            'canDelete' => (bool)$actor->admin || (!$workflow->adminManaged && $access->canView($workflow, $actor) && $access->can($actor, $access->owns($workflow, $actor) ? 'delete' : 'deleteOthers')),
+            'ownerName' => $workflow->ownerId ? (Craft::$app->getUsers()->getUserById($workflow->ownerId)?->getFriendlyName() ?? 'Former user') : 'Administrators',
+            'visibility' => $workflow->visibility, 'ownerId' => $workflow->ownerId, 'adminManaged' => $workflow->adminManaged, 'archived' => $workflow->archived,
+            'canEdit' => $workflow->id === null ? AutofillPlugin::getInstance()->getWorkflowAccess()->can(Craft::$app->getUser()->getIdentity(), 'create') : AutofillPlugin::getInstance()->getWorkflowAccess()->canEdit($workflow, Craft::$app->getUser()->getIdentity()),
+            'processing' => $workflow->id !== null && \jtdev\craftautofill\records\WorkflowRunRecord::find()->where(['workflowId' => $workflow->id, 'status' => ['queued', 'running']])->exists(),
+            'canConfigureAutomatic' => AutofillPlugin::getInstance()->getWorkflowAccess()->can(Craft::$app->getUser()->getIdentity(), 'automatic'),
             'id' => $workflow->id, 'uid' => $workflow->uid, 'handle' => $workflow->handle, 'name' => $workflow->name,
+            'description' => $workflow->description,
             'scope' => $workflow->scope, 'entryTypeUid' => $workflow->entryTypeUid, 'volumeUid' => $workflow->volumeUid,
             'modelConfigUid' => $workflow->modelConfigUid, 'globalPrompt' => $workflow->globalPrompt,
             'actionButtonLabel' => $workflow->actionButtonLabel, 'showUserPromptInput' => $workflow->showUserPromptInput,
@@ -221,12 +274,12 @@ class WorkflowsController extends Controller
 
     private function entryTypeOptions(): array
     {
-        return array_map(static fn(EntryType $type): array => ['uid' => (string)$type->uid, 'name' => (string)$type->name], Craft::$app->getEntries()->getAllEntryTypes());
+        return array_map(static fn(EntryType $type): array => ['uid' => (string)$type->uid, 'name' => (string)$type->name], array_filter(Craft::$app->getEntries()->getAllEntryTypes(), fn(EntryType $type): bool => AutofillPlugin::getInstance()->getWorkflowAccess()->canConfigureScope(new Workflow(['entryTypeUid' => (string)$type->uid]), Craft::$app->getUser()->getIdentity())));
     }
 
     private function volumeOptions(): array
     {
-        return array_map(static fn(Volume $volume): array => ['uid' => (string)$volume->uid, 'name' => (string)$volume->name], Craft::$app->getVolumes()->getAllVolumes());
+        return array_map(static fn(Volume $volume): array => ['uid' => (string)$volume->uid, 'name' => (string)$volume->name], array_filter(Craft::$app->getVolumes()->getAllVolumes(), fn(Volume $volume): bool => AutofillPlugin::getInstance()->getWorkflowAccess()->canConfigureScope(new Workflow(['scope' => 'asset', 'volumeUid' => (string)$volume->uid]), Craft::$app->getUser()->getIdentity())));
     }
 
     /** @return array<int, array{key:string,label:string}> */
@@ -242,8 +295,13 @@ class WorkflowsController extends Controller
         $seen = array_fill_keys(array_column($options, 'key'), true);
         $volumes = $selectedVolume ? [$selectedVolume] : Craft::$app->getVolumes()->getAllVolumes();
         foreach ($volumes as $volume) {
+            $access = AutofillPlugin::getInstance()->getWorkflowAccess();
+            $actor = Craft::$app->getUser()->getIdentity();
+            $scope = new Workflow(['scope' => 'asset', 'volumeUid' => (string)$volume->uid]);
+            if (!$actor->admin && !$actor->can("viewAssets:$volume->uid")) continue;
             $layout = $volume->getFieldLayout();
             foreach ($layout->getCustomFields() as $field) {
+                if (!$access->canUseField($scope, (string)($field->layoutElement->uid ?? $field->uid), $actor)) continue;
                 $handle = trim((string)$field->handle);
                 if ($handle === '' || isset($seen[$handle])) continue;
                 $options[] = [

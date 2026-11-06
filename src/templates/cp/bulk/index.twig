@@ -1,92 +1,151 @@
 {% extends '_layouts/cp.twig' %}
 {% import '_includes/forms.twig' as forms %}
-
 {% set title = 'Bulk Autofill'|t('autofill') %}
 {% set selectedSubnavItem = 'bulk' %}
-{% set fullPageForm = true %}
-{% set submitButtonLabel = 'Queue Autofill'|t('autofill') %}
-
-{% set autofillFieldHelpTip %}
-    {% include 'autofill/fields/autofill/partials/_help-tip.twig' with {
-        tooltipText: 'Choose the Autofill field configuration that should generate and apply suggestions.'|t('autofill')
-    } only %}
-{% endset %}
-{% set entriesHelpTip %}
-    {% include 'autofill/fields/autofill/partials/_help-tip.twig' with {
-        tooltipText: 'Choose one or more entries. Use the section list in the selector to narrow the entry browser.'|t('autofill')
-    } only %}
-{% endset %}
-{% set siteHelpTip %}
-    {% include 'autofill/fields/autofill/partials/_help-tip.twig' with {
-        tooltipText: 'Leave this set to the default entry site unless the selected entries should be processed for a specific site.'|t('autofill')
-    } only %}
-{% endset %}
-{% set userPromptHelpTip %}
-    {% include 'autofill/fields/autofill/partials/_help-tip.twig' with {
-        tooltipText: 'Optional instructions to include with this bulk run.'|t('autofill')
-    } only %}
-{% endset %}
 
 {% block content %}
-    {{ actionInput('autofill/bulk/queue') }}
-    {{ redirectInput('autofill/bulk') }}
+    <div class="af-bulk">
+        {% if sites|length > 1 %}
+            <div class="af-bulk-site">
+                <label for="bulk-site">{{ 'Site'|t('app') }}</label>
+                <div class="select">
+                    <select id="bulk-site">
+                        {% for option in sites %}
+                            <option value="{{ option.id }}"{{ site and option.id == site.id ? ' selected' }}>{{ option.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        {% endif %}
 
-    {% if not craft.app.plugins.getPlugin('autofill').isProEdition() %}
-        <p class="warning with-icon">
-            {{ 'Bulk Autofill is only available in Autofill Pro.'|t('autofill') }}
-        </p>
-    {% endif %}
+        {% if workflows is empty %}
+            <div class="af-bulk-empty">{{ 'No available workflows.'|t('autofill') }}</div>
+        {% else %}
+            <h2 class="af-bulk-prompt">{{ 'Choose a workflow'|t('autofill') }}</h2>
+            <div class="af-bulk-workflows" aria-label="{{ 'Choose a workflow'|t('autofill') }}">
+                {% for option in workflowOptions %}
+                    {% set workflow = option.workflow %}
+                    <article class="af-bulk-workflow" data-workflow="{{ workflow.handle }}">
+                        <div class="af-bulk-workflow-copy">
+                            {% if option.scopeIcon %}<span class="af-bulk-scope-icon cp-icon" aria-hidden="true">{{ option.scopeIcon|raw }}</span>{% endif %}
+                            <h3>{{ workflow.name }}</h3>
+                            {% if workflow.description %}<p>{{ workflow.description }}</p>{% endif %}
+                        </div>
+                        <details class="af-bulk-details">
+                            <summary>{{ 'More information'|t('autofill') }}</summary>
+                            <dl>
+                                <div><dt>{{ workflow.scope == 'asset' ? 'Volume'|t('app') : 'Entry type'|t('app') }}</dt><dd>{{ option.scopeName ?: 'Unavailable'|t('autofill') }}</dd></div>
+                                <div><dt>{{ 'Additional instructions'|t('autofill') }}</dt><dd>{{ workflow.showUserPromptInput ? 'Allowed'|t('autofill') : 'Not enabled'|t('autofill') }}</dd></div>
+                                <div><dt>{{ 'Field changes'|t('autofill') }}</dt><dd>{{ option.automatic ? 'Some changes apply automatically'|t('autofill') : 'Changes require review'|t('autofill') }}</dd></div>
+                                <div><dt>{{ 'Context fields'|t('autofill') }}</dt><dd>{{ option.contextFields ? option.contextFields|join(', ') : 'None'|t('autofill') }}</dd></div>
+                                <div><dt>{{ 'Fields to fill'|t('autofill') }}</dt><dd>{{ option.outputFields ? option.outputFields|join(', ') : 'None'|t('autofill') }}</dd></div>
+                            </dl>
+                        </details>
+                        <button type="button" class="btn submit af-bulk-select" data-select-workflow="{{ workflow.handle }}">{{ 'Select workflow'|t('autofill') }}</button>
+                    </article>
+                {% endfor %}
+            </div>
+            <button type="button" class="btn af-bulk-change" hidden>{{ 'Change workflow'|t('autofill') }}</button>
+        {% endif %}
 
-    <p class="light">
-        {{ 'Select the Autofill field to run, choose the entries that should be processed, then queue the jobs. Each selected entry will be processed separately by Craft’s queue.'|t('autofill') }}
-    </p>
-
-    {{ forms.selectField({
-        label: 'Autofill Field'|t('autofill') ~ autofillFieldHelpTip,
-        id: 'fieldId',
-        name: 'fieldId',
-        options: [{
-            label: autofillFieldOptions is empty
-                ? 'No Autofill fields are available.'|t('autofill')
-                : 'Select an Autofill field'|t('autofill'),
-            value: '',
-        }]|merge(autofillFieldOptions),
-        value: selectedFieldId,
-        required: true,
-        disabled: autofillFieldOptions is empty,
-    }) }}
-
-    {{ forms.elementSelectField({
-        label: 'Entries'|t('app') ~ entriesHelpTip,
-        id: 'entryIds',
-        name: 'entryIds',
-        elementType: 'craft\\elements\\Entry',
-        selectionLabel: 'Select entries'|t('autofill'),
-        sources: entrySources,
-        elements: selectedEntries,
-        viewMode: 'list',
-        showSiteMenu: true,
-        limit: null,
-        required: true,
-    }) }}
-
-    {{ forms.selectField({
-        label: 'Site'|t('app') ~ siteHelpTip,
-        id: 'siteId',
-        name: 'siteId',
-        options: siteOptions,
-        value: selectedSiteId,
-    }) }}
-
-    {{ forms.textareaField({
-        label: 'User Prompt'|t('autofill') ~ userPromptHelpTip,
-        id: 'userPrompt',
-        name: 'userPrompt',
-        value: userPrompt,
-        rows: 4,
-    }) }}
+        {% if site %}
+        {% for option in workflowOptions %}
+            {% set workflow = option.workflow %}
+            <form method="post" class="af-bulk-next" data-workflow-panel="{{ workflow.handle }}" hidden>
+                {{ csrfInput() }}
+                {{ actionInput('autofill/bulk/queue') }}
+                {{ hiddenInput('workflowHandle', workflow.handle) }}
+                {{ hiddenInput('siteId', site.id) }}
+                <div class="af-bulk-section-heading">
+                    <div>
+                        <h2>{{ workflow.scope == 'asset' ? 'Choose assets'|t('autofill') : 'Choose entries'|t('autofill') }}</h2>
+                    </div>
+                </div>
+                {{ forms.elementSelectField({
+                    label: workflow.scope == 'asset' ? 'Assets'|t('app') : 'Entries'|t('app'),
+                    id: 'elementIds-' ~ workflow.id, name: 'elementIds',
+                    elementType: workflow.scope == 'asset' ? 'craft\\elements\\Asset' : 'craft\\elements\\Entry',
+                    sources: option.sources, criteria: option.criteria, elements: [], limit: null, required: true,
+                    selectionLabel: workflow.scope == 'asset' ? 'Select assets'|t('autofill') : 'Select entries'|t('autofill'),
+                }) }}
+                {% if workflow.showUserPromptInput %}
+                    {{ forms.textareaField({label: 'Additional instructions'|t('autofill'), id: 'userPrompt-' ~ workflow.id, name: 'userPrompt', rows: 3, placeholder: 'Add any guidance for this run (optional)'|t('autofill')}) }}
+                {% endif %}
+                {% if option.automatic %}
+                    {{ forms.checkboxField({id: 'confirmAutomatic-' ~ workflow.id, name: 'confirmAutomatic', label: 'Some fields will be applied automatically without review. Run this batch.'|t('autofill'), value: '1', required: true}) }}
+                {% endif %}
+                <div class="af-bulk-actions"><button type="submit" class="btn submit">{{ 'Run workflow'|t('autofill') }}</button></div>
+            </form>
+        {% endfor %}
+        {% endif %}
+    </div>
 {% endblock %}
 
 {% css %}
-{% include 'autofill/fields/autofill/assets/settings/index.css.twig' %}
+    .af-bulk { max-width: 1280px; margin: 38px auto 80px; }
+    .af-bulk-site { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-bottom: 16px; }
+    .af-bulk-site label { font-weight: 600; }
+    .af-bulk-prompt { margin: 0 0 20px; text-align: center; font-size: 22px; }
+    .af-bulk-workflows { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 16px; }
+    .af-bulk-workflows.has-selection { display: block; max-width: 720px; margin: 0 auto; }
+    .af-bulk-workflow { display: flex; flex-direction: column; min-width: 0; padding: 22px; border: 1px solid #dce3ea; border-radius: 12px; background: #fff; box-shadow: 0 2px 8px rgba(31, 49, 70, .04); }
+    .af-bulk-workflow.is-selected { border-color: #3976b8; }
+    .af-bulk-workflow[hidden], .af-bulk-next[hidden], .af-bulk-change[hidden], .af-bulk-select[hidden] { display: none; }
+    .af-bulk-change { margin-top: 12px; }
+    .af-bulk-workflow-copy h3 { margin: 0; font-size: 16px; }
+    .af-bulk-scope-icon { display: block; width: 24px; height: 24px; margin-bottom: 12px; color: #596c85; }
+    .af-bulk-workflow-copy p { margin: 9px 0 0; color: #596a7c; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+    .af-bulk-details { margin: auto 0 18px; border-top: 1px solid #e5eaf0; padding-top: 14px; }
+    .af-bulk-workflow-copy { padding-bottom: 18px; }
+    .af-bulk-select { align-self: flex-start; }
+    .af-bulk-details summary { cursor: pointer; color: #356da8; font-weight: 600; }
+    .af-bulk-details dl { display: grid; gap: 10px; margin: 15px 0 0; }
+    .af-bulk-details dl div { display: grid; gap: 3px; }
+    .af-bulk-details dt { color: #667586; }
+    .af-bulk-details dd { margin: 0; overflow-wrap: anywhere; }
+    .af-bulk-empty, .af-bulk-next { margin-top: 24px; padding: 26px; border: 1px solid #dce3ea; border-radius: 14px; background: #fff; }
+    .af-bulk-section-heading { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 24px; }
+    .af-bulk-section-heading h2 { font-size: 19px; margin: 0 0 4px; }
+    .af-bulk-actions { display: flex; justify-content: flex-end; margin-top: 24px; }
+    .af-bulk-next { max-width: 720px; box-sizing: border-box; margin-left: auto; margin-right: auto; }
+    .af-bulk-change { display: block; margin-left: auto; margin-right: auto; }
+    @media (max-width: 1100px) { .af-bulk-workflows { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 850px) { .af-bulk-workflows { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 550px) { .af-bulk-workflows { grid-template-columns: 1fr; } }
+    @media (max-width: 600px) { .af-bulk { margin-top: 20px; } .af-bulk-next { padding: 20px; } }
 {% endcss %}
+
+{% js %}
+    const workflowCards = Array.from(document.querySelectorAll('.af-bulk-workflow'));
+    const workflowPanels = Array.from(document.querySelectorAll('[data-workflow-panel]'));
+    const workflowGrid = document.querySelector('.af-bulk-workflows');
+    const changeWorkflow = document.querySelector('.af-bulk-change');
+    function selectWorkflow(handle) {
+        workflowCards.forEach(card => {
+            const active = card.dataset.workflow === handle;
+            card.hidden = !!handle && !active;
+            card.classList.toggle('is-selected', active);
+            card.querySelector('.af-bulk-select').hidden = active;
+        });
+        workflowGrid?.classList.toggle('has-selection', !!handle);
+        workflowPanels.forEach(panel => { panel.hidden = panel.dataset.workflowPanel !== handle; });
+        if (changeWorkflow) changeWorkflow.hidden = !handle;
+        const url = new URL(window.location.href);
+        if (handle) url.searchParams.set('workflow', handle);
+        else url.searchParams.delete('workflow');
+        window.history.replaceState(window.history.state, '', url.toString());
+    }
+    document.querySelectorAll('[data-select-workflow]').forEach(button => {
+        button.addEventListener('click', () => selectWorkflow(button.dataset.selectWorkflow));
+    });
+    changeWorkflow?.addEventListener('click', () => {
+        selectWorkflow('');
+        workflowCards[0]?.querySelector('.af-bulk-select')?.focus();
+    });
+    selectWorkflow({{ (selected.handle ?? '')|json_encode|raw }});
+    document.getElementById('bulk-site')?.addEventListener('change', event => {
+        const target = new URL(window.location.href);
+        target.searchParams.set('site', event.target.value);
+        window.location.assign(target.toString());
+    });
+{% endjs %}

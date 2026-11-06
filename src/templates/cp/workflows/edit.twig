@@ -5,10 +5,12 @@
 {% do view.registerAssetBundle('jtdev\\craftautofill\\web\\assets\\cp\\AutofillCpAsset') %}
 {% set options = {
     screen: 'editor', workflow: workflow, entryTypes: entryTypes, volumes: volumes, modelConfigs: modelConfigs,
+    isAdmin: isAdmin,
     listUrl: url('autofill/workflows'),
     editUrl: workflow.handle ? url('autofill/workflows/edit/' ~ workflow.handle) : url('autofill/workflows/new'),
     fieldsUrl: actionUrl('autofill/workflows/fields'),
     saveUrl: actionUrl('autofill/workflows/save'),
+    archiveUrl: actionUrl('autofill/workflows/set-archived'),
 } %}
 {% block actionButton %}
     <div id="autofill-workflow-actions"></div>
