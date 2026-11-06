@@ -128,6 +128,7 @@ final class BulkWorkflowAuthorizationTest extends Unit
                 (int)$migratedField->id,
                 null,
                 (int)$project['entry']->id,
+                null, '', 'integration', (int)User::find()->admin()->one()->id,
             );
 
             self::assertTrue($result['success'], (string)$result['error']);

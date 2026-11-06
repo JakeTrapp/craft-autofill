@@ -49,6 +49,12 @@ composer test:integration
 
 The compatibility wrapper `testbench/bin/test` delegates to the integration suite. Unit tests run separately with `composer test:unit`, without starting Craft or Docker. `testbench/bin/test-live` is the only wrapper that sends a real OpenAI request.
 
+## Release upgrade rehearsal
+
+Run `tests/upgrade/run` to install the actual local `1.0.7` tag, save a configured Autofill field and existing content, then load the working source in a separate process and run Craft's plugin migrations. Both Lite and Pro are checked. The rehearsal verifies field references, instructions/options, administrator-managed public defaults, preserved content/edition, current run storage and repeatable migrations.
+
+The local `1.0.7` Git tag is required. Released source is exported into ignored `testbench/.upgrade-legacy/`; no old site or dependency tree is committed. This command uses the same guarded `db_test` database and exclusive lock as the other suites. It does not touch the manual site's `db` or send model requests.
+
 ## Browser tests
 
 The Playwright suite uses the marked `db_test` database and a deterministic provider registered only by the testbench module. It starts Craft with PHP's local server on `127.0.0.1:8097`; it does not change the DDEV web database setting.

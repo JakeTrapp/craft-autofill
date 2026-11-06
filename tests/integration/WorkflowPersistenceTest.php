@@ -85,6 +85,9 @@ final class WorkflowPersistenceTest extends Unit
         self::assertInstanceOf(WorkflowRecord::class, $record);
         self::assertSame($expectedRows, $service->getByHandle($linkedField->workflowHandle)->rows);
         $migrated = $service->getByHandle($linkedField->workflowHandle);
+        self::assertSame('public', $migrated->visibility);
+        self::assertTrue($migrated->adminManaged);
+        self::assertNull($migrated->ownerId);
         self::assertSame($field->contextRows, $migrated->contextRows);
         self::assertSame($field->modelConfigUid, $migrated->modelConfigUid);
         self::assertSame($field->actionButtonLabel, $migrated->actionButtonLabel);

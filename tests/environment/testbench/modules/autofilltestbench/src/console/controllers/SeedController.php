@@ -218,7 +218,7 @@ final class SeedController extends Controller
                 ],
             ]),
         ];
-        if (class_exists('craft\\ckeditor\\Field')) {
+        if (Craft::$app->getPlugins()->isPluginEnabled('ckeditor')) {
             $browserOutputFields[] = new \craft\ckeditor\Field([
                 'name' => 'Browser rich text',
                 'handle' => 'browserRichText' . $entrySuffix,
@@ -256,14 +256,17 @@ final class SeedController extends Controller
         imagedestroy($image);
         $assetFixture = AssetTestProject::createVolumeWithAssets([
             'browser-test.png' => $browserImage,
+            'browser-bulk.png' => $browserImage,
+            'browser-archive.png' => $browserImage,
         ], public: true);
-        $asset = $assetFixture['assets'][0];
+        [$asset, $bulkAsset, $archiveAsset] = $assetFixture['assets'];
         $assetCaption = $assetFixture['volume']->getFieldLayout()->getCustomFields()[0];
         $assetCaptionUid = (string)($assetCaption->layoutElement->uid ?? $assetCaption->uid);
         $assetSuffix = substr(str_replace('-', '', (string)$assetFixture['volume']->uid), 0, 8);
         $assetWorkflow = new Workflow([
             'handle' => 'browserAssetWorkflow' . $assetSuffix,
             'name' => 'Browser asset workflow',
+            'description' => 'Generate accessible alt text and captions.',
             'scope' => 'asset',
             'volumeUid' => (string)$assetFixture['volume']->uid,
             'rows' => [[
@@ -327,9 +330,32 @@ final class SeedController extends Controller
             ]);
         }
 
+        $manager = User::find()->username('autofill-browser-manager')->one() ?? new User(['username' => 'autofill-browser-manager', 'email' => 'autofill-browser-manager@example.test']);
+        $manager->admin = false;
+        $manager->enabled = true;
+        $manager->newPassword = 'autofill-browser-manager-password';
+        if (!Craft::$app->getElements()->saveElement($manager, false, false, false)) throw new RuntimeException('Could not save the workflow manager fixture.');
+        Craft::$app->getUsers()->activateUser($manager);
+        $managerPermissions = ['accessCp', 'accessPlugin-autofill'];
+        foreach (['view', 'viewOthers', 'create', 'edit', 'editOthers', 'run', 'bulk', 'review', 'reviewOthers'] as $permission) $managerPermissions[] = 'autofill-' . $permission;
+        foreach (['viewEntries', 'saveEntries', 'viewPeerEntries', 'savePeerEntries'] as $permission) $managerPermissions[] = $permission . ':' . $section->uid;
+        Craft::$app->getUserPermissions()->saveUserPermissions((int)$manager->id, $managerPermissions);
+        $protected = new Workflow([
+            'handle' => 'browser-protected-automatic-' . $assetSuffix, 'name' => 'Protected automatic outputs',
+            'ownerId' => (int)$manager->id, 'entryTypeUid' => (string)$entry->getType()->uid,
+            'rows' => [
+                ['targetFieldUid' => $project['targetUid'], 'prompt' => 'Protected automatic instructions', 'requiresApproval' => false],
+                ['targetFieldUid' => '__native__:title', 'prompt' => 'Editable review instructions', 'requiresApproval' => true],
+            ],
+        ]);
+        if (!$workflowService->saveWorkflow($protected)) throw new RuntimeException('Could not save the protected workflow fixture.');
+
         $this->stdout(json_encode([
             'username' => $username,
             'password' => $password,
+            'managerUsername' => $manager->username,
+            'managerPassword' => 'autofill-browser-manager-password',
+            'protectedWorkflowHandle' => $protected->handle,
             'editorUsername' => $editorUsername,
             'editorPassword' => $editorPassword,
             'entryId' => (int)$entry->id,
@@ -348,6 +374,8 @@ final class SeedController extends Controller
             ], $browserOutputFields),
             'editorPath' => sprintf('/admin/entries/%s/%d-%d', (string)$section?->handle, (int)$entry->id, (int)$entry->siteId),
             'assetId' => (int)$asset->id,
+            'bulkAsset' => ['id' => (int)$bulkAsset->id, 'path' => $bulkAsset->getCpEditUrl()],
+            'archiveAsset' => ['id' => (int)$archiveAsset->id, 'path' => $archiveAsset->getCpEditUrl()],
             'volumeUid' => (string)$assetFixture['volume']->uid,
             'assetWorkflowHandle' => $assetWorkflow->handle,
             'assetAutofillFieldId' => (int)$assetAutofillField->id,

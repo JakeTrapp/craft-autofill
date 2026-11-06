@@ -35,6 +35,14 @@ final class FixtureOpenAiProvider implements AiProviderInterface
             throw new RuntimeException('The fixture provider received malformed generation rows.');
         }
 
+        if (str_contains($prompt, 'AUTOFILL_EDGE_REVIEW_FIXTURE')) {
+            return ['output_text' => json_encode(['suggestions' => [
+                ['fieldName' => 'Browser generated summary', 'value' => ['unexpected' => 'A text field cannot store this object']],
+                ['fieldName' => 'Browser status', 'value' => 'queued'],
+                ['fieldName' => 'Browser table', 'value' => ['rows' => [['label' => 'Bad numeric cell', 'amount' => 'not a number']]]],
+            ]], JSON_THROW_ON_ERROR)];
+        }
+
         $suggestions = [];
         foreach ($rows as $row) {
             if (!is_array($row)) {

@@ -1,0 +1,23 @@
+actor: Tester
+paths:
+  tests: tests
+  output: tests/_output
+  data: tests/_data
+  support: tests/_support
+  envs: tests/_envs
+bootstrap: _bootstrap_upgrade.php
+params:
+  - tests/.env
+modules:
+  config:
+    \craft\test\Craft:
+      configFile: tests/_craft/config/test.php
+      entryUrl: https://craft-autofill-testbench.ddev.site/index.php
+      projectConfig: {}
+      migrations: []
+      plugins: []
+      cleanup: false
+      transaction: false
+      dbSetup:
+        clean: false
+        setupCraft: false

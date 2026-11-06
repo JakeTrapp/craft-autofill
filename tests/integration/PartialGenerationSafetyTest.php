@@ -83,6 +83,7 @@ final class PartialGenerationSafetyTest extends Unit
             $definition = $this->addNativeTitleOutput($project['autofill']);
             self::assertTrue(Craft::$app->getFields()->saveField($definition), implode(' ', $definition->getErrorSummary(true)));
 
+            AutofillPlugin::getInstance()->getWorkflowService()->migrateLegacyFields();
             $result = AutofillPlugin::getInstance()->getBulkAutofillService()->runForEntry(
                 (int)$definition->id,
                 null,
@@ -90,6 +91,7 @@ final class PartialGenerationSafetyTest extends Unit
                 $project['siteId'],
                 'Generate the requested values.',
                 'partial-safety-test',
+                (int)\craft\elements\User::find()->admin()->one()->id,
             );
 
             self::assertSame(1, $provider->calls, 'Generation should make one provider call; applying siblings must not trigger another.');

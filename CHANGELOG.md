@@ -36,6 +36,7 @@
 - Tightened field-specific validation and safe conversions for option labels, numeric limits and precision, text limits, dates and times, countries, addresses, structured data, and relationship sources. Ambiguous values and malformed rows or selections are rejected instead of guessed, truncated, or silently discarded.
 - Fixed date-only values shifting across time zones, country-name lookup, currency values being rounded during conversion, and missing API-key environment variables causing a PHP error.
 - Expanded edge-case and Craft persistence coverage across all 26 field adapters, with a per-field coverage guide and browser checks for editable and read-only failures.
+- Expanded browser and integration coverage for workflow sharing, background runs, inbox review, and archive recovery. Added an upgrade rehearsal from 1.0.7 for Lite and Pro.
 
 ## 1.0.7 - 2026-07-27
 - Fixed a bug that cut off plain text fields value
