@@ -10,6 +10,21 @@ use Tests\Support\TestProject;
 
 final class SuggestionSafetyTest extends Unit
 {
+    public function testNativeDateTimeWithoutOffsetUsesCraftTimeZone(): void
+    {
+        $project = TestProject::create(new PlainText(['name' => 'Date context', 'handle' => 'dateContext']));
+        $definition = $project['autofill'];
+        $definition->rows = [['targetFieldUid' => '__native__:postDate', 'prompt' => 'Suggest a post date.']];
+        $result = AutofillPlugin::getInstance()->getAiService()->responseNormalizer->normalizeForElement(
+            '{"suggestions":[{"fieldName":"Post Date","value":"2026-11-06T06:00:00"}]}',
+            $definition,
+            $project['entry'],
+        );
+        $localDate = new \DateTimeImmutable('2026-11-06T06:00:00', new \DateTimeZone(\Craft::$app->getTimeZone()));
+        self::assertSame([], $result->suggestions[0]['validationErrors']);
+        self::assertSame($localDate->format(\DateTimeInterface::ATOM), $result->suggestions[0]['value']);
+    }
+
     public function testInvalidValuesCannotEraseExistingContentThroughEitherApplyPath(): void
     {
         $project = TestProject::create(new PlainText(['name' => 'Summary', 'handle' => 'safeSummary']));

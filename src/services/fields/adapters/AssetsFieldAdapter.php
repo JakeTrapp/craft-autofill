@@ -24,7 +24,7 @@ class AssetsFieldAdapter implements FieldAdapterInterface
 
     public function isAvailableInLiteVersion(): bool
     {
-        return false;
+        return true;
     }
 
     public function supports(FieldInterface $field): bool

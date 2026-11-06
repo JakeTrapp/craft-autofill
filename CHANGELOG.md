@@ -1,6 +1,17 @@
 # Release Notes for Autofill
 ## Unreleased
 
+- Made Assets fields available for context and output in Lite as well as Pro.
+- Enabled sidebar placement by default for new asset workflows and file content by default for newly added asset context fields.
+- Opened the Pro Inbox from the main Autofill navigation when the current user has results to review. Otherwise, the link opens Workflows.
+- Added a dismiss button to Inbox rows for users who can manage the run.
+- Replaced the Inbox content type column with the name of the user who started the run. Clicking a row opens its results for review.
+- Fixed shared runs appearing in the Inbox and editor for users without permission to review other users’ public results.
+- Added recovery for Craft security-token rejections on editor, review, and notification requests. The editor resumes status checks after temporary failures, and failed review actions keep edits available for retry.
+- Used Craft's configured time zone for Post Date and Expiration Date suggestions without an offset. Edited date and time suggestions now submit with a time zone.
+- Added one repair request per run for invalid suggestions tied to a configured field. The retry uses the same model and context, sends the validation feedback, and replaces only suggestions that pass validation before review opens.
+- Kept valid Tags, Entries, and Categories selections when the model includes unavailable or ambiguous titles. Autofill records dropped titles in the request log and skips the field when no selections match.
+- Skipped fields the model returns as null. Existing values stay in place, and those fields do not require review or a repair request.
 - Compacted sidebar workflows into expandable rows with always-visible Run/Review actions, accessible regenerate/dismiss icons, and grouped workflow names. Fixed unavailable actions remaining visible due to button styles overriding hidden attributes.
 - Fixed the workflow editor form being hidden after the native-table cleanup.
 - Switched the inbox and request logs to Craft's native Vue admin tables, with native search, log pagination/sorting and expandable request details.
@@ -33,7 +44,7 @@
 - Fixed new workflows starting with an unusable blank output card and Autofill's sidebar submenu collapsing on Bulk Autofill and Logs.
 - Revalidated suggestions and editor corrections on the server before saving. Missing, null, and empty results can no longer erase existing content.
 - Preserved invalid returned values and validation details for review and logging. Supported editors can correct invalid values; invalid read-only results cannot be accepted, and valid suggestions in the same response remain usable, including during bulk runs.
-- Tightened field-specific validation and safe conversions for option labels, numeric limits and precision, text limits, dates and times, countries, addresses, structured data, and relationship sources. Ambiguous values and malformed rows or selections are rejected instead of guessed, truncated, or silently discarded.
+- Tightened field-specific validation and safe conversions for option labels, numeric limits and precision, text limits, dates and times, countries, addresses, structured data, and relationship sources. Malformed rows and selections still require correction.
 - Fixed date-only values shifting across time zones, country-name lookup, currency values being rounded during conversion, and missing API-key environment variables causing a PHP error.
 - Expanded edge-case and Craft persistence coverage across all 26 field adapters, with a per-field coverage guide and browser checks for editable and read-only failures.
 - Expanded browser and integration coverage for workflow sharing, background runs, inbox review, and archive recovery. Added an upgrade rehearsal from 1.0.7 for Lite and Pro.

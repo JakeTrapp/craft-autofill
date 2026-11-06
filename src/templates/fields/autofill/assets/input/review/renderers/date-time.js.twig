@@ -59,21 +59,22 @@
                 timeInput.value = '';
             }
         },
-        readValue({ container }) {
+        readValue({ suggestion, container }) {
             const dateInput = container.querySelector('[data-autofill-review-input="datetime-date"], input[type="date"]');
             const timeInput = container.querySelector('[data-autofill-review-input="datetime-time"], input[type="time"]');
             const dateValue = dateInput instanceof HTMLInputElement ? dateInput.value : '';
             const timeValue = timeInput instanceof HTMLInputElement ? timeInput.value : '';
 
-            if (dateValue === '') {
-                return '';
+            if (!dateValue || !timeValue) return '';
+
+            const original = parseSuggestionDate(suggestion.value);
+            if (!suggestion.validationErrors?.length && original && toDateInputValue(original) === dateValue && toTimeInputValue(original) === timeValue) {
+                return suggestion.value;
             }
 
-            if (timeValue === '') {
-                return dateValue;
-            }
-
-            return `${dateValue}T${timeValue}`;
+            const edited = parseSuggestionDate(`${dateValue}T${timeValue}`);
+            if (!edited || toDateInputValue(edited) !== dateValue || toTimeInputValue(edited) !== timeValue) return '';
+            return edited.toISOString().replace(/\.\d{3}Z$/, 'Z');
         },
     });
 

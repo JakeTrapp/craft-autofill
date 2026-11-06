@@ -144,7 +144,7 @@
         editor.submittingForm = true;
         editor.$actionBtn?.addClass?.('loading');
         try {
-            const response = await window.Craft.sendActionRequest('POST', null, { headers: editor._saveHeaders, data });
+            const response = await runtime.requestWithSession(() => window.Craft.sendActionRequest('POST', null, { headers: editor._saveHeaders, data }));
             const responseData = response?.data || response || {};
             if (responseData.success === false || responseData.data?.success === false) {
                 window.sessionStorage.removeItem(key);
@@ -250,6 +250,29 @@
         let pollTimer = null;
         let autoOpenReview = config.autoOpenReview === true;
         const requestRun = async (endpoint, payload) => runtime.runRequest(endpoint, payload);
+        const runIsWaiting = (run) => run && ['queued', 'running'].includes(run.status);
+        const scheduleStatusCheck = (run, delay = 2000) => {
+            pollTimer = setTimeout(() => checkRunStatus(run, delay), delay);
+        };
+        const checkRunStatus = async (run, delay = 2000) => {
+            if (!root.isConnected || currentRun !== run) return;
+            generateButton.disabled = true;
+            try {
+                const data = await requestRun(config.runStatusActionUrl, { runId: run.id });
+                if (root.isConnected && currentRun === run) updateRun(data.run, true);
+            } catch (error) {
+                if (!root.isConnected || currentRun !== run) return;
+                if (error.retryable) {
+                    statusMessage(root, 'Could not check Autofill status. Trying again…');
+                    scheduleStatusCheck(run, Math.min(delay * 2, 15000));
+                    return;
+                }
+                statusMessage(root, error.message);
+                generateButton.textContent = 'Check status';
+                generateButton.removeAttribute('aria-label');
+                generateButton.disabled = false;
+            }
+        };
         const consumeReviewLink = (run) => {
             // Consume the inbox handoff before opening. Closing review reloads
             // the editor, which must not repeat the automatic-open request.
@@ -270,9 +293,10 @@
             reviewModal.setSuggestions(pending);
         };
         const updateRun = (run, notify = false) => {
+            clearTimeout(pollTimer);
             currentRun = run;
             root.dataset.autofillRunState = run?.status || 'idle';
-            const waiting = run && ['queued', 'running'].includes(run.status);
+            const waiting = runIsWaiting(run);
             generateButton.disabled = !!waiting || ((!!config.selectedRunId || config.canStart === false) && run?.status !== 'ready');
             const regenerate = root.querySelector('[data-autofill-regenerate]');
             const cancel = root.querySelector('[data-autofill-cancel]');
@@ -282,8 +306,8 @@
             if (config.sidebar) {
                 generateButton.classList.toggle('submit', run?.status === 'ready');
                 generateButton.setAttribute('aria-label', `${generateButton.textContent} ${config.workflowName}`);
-                if (waiting) statusMessage(root, 'Generating results…');
             }
+            if (waiting) statusMessage(root, 'Generating results…');
             if (!run) return;
             const applied = (run.suggestions || []).filter(item => item.state === 'applied').length;
             const automaticApplied = (run.suggestions || []).filter(item => item.state === 'applied' && item.applicationMode === 'automatic').length;
@@ -326,16 +350,7 @@
                     consumeReviewLink(run);
                 }
             } else if (run.status === 'failed') statusMessage(root, run.error || 'Autofill failed.');
-            if (waiting) {
-                clearTimeout(pollTimer);
-                pollTimer = setTimeout(async () => {
-                    if (!root.isConnected) return;
-                    try {
-                        const data = await requestRun(config.runStatusActionUrl, { runId: run.id });
-                        updateRun(data.run, true);
-                    } catch (error) { statusMessage(root, error.message); generateButton.disabled = false; }
-                }, 2000);
-            }
+            if (waiting) scheduleStatusCheck(run);
         };
         root._autofillStart = async (request) => {
             if (currentRun?.status === 'ready') {
@@ -402,6 +417,7 @@
         });
 
         generateButton.addEventListener('click', () => {
+            if (runIsWaiting(currentRun)) return checkRunStatus(currentRun);
             if (config.sidebar && isTestMode && currentRun?.status !== 'ready') setSidebarOpen(true);
             return lockButton(generateButton, () => currentRun?.status === 'ready' ? root._autofillStart({}) : saveFirst(
                 root,
@@ -431,7 +447,12 @@
         root.dataset.autofillInitialized = '1';
         if (!isTestMode && Number(config.elementId)) {
             requestRun(config.selectedRunId ? config.runStatusActionUrl : config.currentRunActionUrl, config.selectedRunId ? { runId: config.selectedRunId } : { workflowHandle: config.workflowHandle, elementId: Number(config.elementId), siteId: Number(config.siteId) || null })
-                .then(data => updateRun(data.run)).catch(error => statusMessage(root, error.message));
+                .then(data => {
+                    if (root.isConnected && !currentRun) updateRun(data.run);
+                })
+                .catch(error => {
+                    if (root.isConnected && !currentRun) statusMessage(root, error.message);
+                });
         }
         restorePendingRun(root, config, reviewModal);
     };

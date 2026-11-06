@@ -165,14 +165,29 @@ class DateFieldAdapter implements FieldAdapterInterface
 
     private function parseSuggestion(FieldInterface $field, string $value): ?\DateTimeImmutable
     {
+        return $this->includesTime($field)
+            ? self::parseDateTime($value)
+            : self::parseDate(trim($value), 'Y-m-d');
+    }
+
+    public static function parseDateTime(string $value, ?\DateTimeZone $localTimeZone = null): ?\DateTimeImmutable
+    {
         $value = trim($value);
-        if ($this->includesTime($field) && str_ends_with($value, 'Z')) $value = substr($value, 0, -1) . '+00:00';
-        if ($value === '') {
+        if (str_ends_with($value, 'Z')) {
+            $value = substr($value, 0, -1) . '+00:00';
+        }
+
+        return self::parseDate($value, \DateTimeInterface::ATOM)
+            ?? ($localTimeZone === null ? null : self::parseDate($value, 'Y-m-d\TH:i:s', $localTimeZone));
+    }
+
+    private static function parseDate(string $value, string $format, ?\DateTimeZone $timeZone = null): ?\DateTimeImmutable
+    {
+        if ($value === '' || str_contains($value, "\0")) {
             return null;
         }
 
-        $format = $this->includesTime($field) ? \DateTimeInterface::ATOM : 'Y-m-d';
-        $date = \DateTimeImmutable::createFromFormat('!' . $format, $value);
+        $date = \DateTimeImmutable::createFromFormat('!' . $format, $value, $timeZone);
         $errors = \DateTimeImmutable::getLastErrors();
         if (!$date instanceof \DateTimeImmutable || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
             return null;

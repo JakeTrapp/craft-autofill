@@ -15,6 +15,8 @@ use jtdev\craftautofill\AutofillPlugin;
 use jtdev\craftautofill\fields\AutofillField;
 use jtdev\craftautofill\models\ai\AiGenerationRequest;
 use jtdev\craftautofill\models\ai\AiGenerationResult;
+use jtdev\craftautofill\services\fields\adapters\AbstractRelatedElementsFieldAdapter;
+use jtdev\craftautofill\services\fields\adapters\DateFieldAdapter;
 use Throwable;
 use yii\base\InvalidArgumentException;
 
@@ -31,14 +33,18 @@ class AiResponseNormalizer extends Component
 
     public ?AutofillField $definitionOverride = null;
 
-    public function normalizeForElement(string $rawResponse, AutofillField $definition, \craft\base\ElementInterface $element): AiGenerationResult
-    {
+    public function normalizeForElement(
+        string $rawResponse,
+        AutofillField $definition,
+        \craft\base\ElementInterface $element,
+        bool $fromModel = false,
+    ): AiGenerationResult {
         $normalizer = clone $this;
         $normalizer->definitionOverride = $definition;
         $normalizer->fieldConfigBuilder = clone $this->fieldConfigBuilder;
         $normalizer->fieldConfigBuilder->definitionOverride = $definition;
         $normalizer->fieldConfigBuilder->elementOverride = $element;
-        return $normalizer->normalizeAutofillResponse($rawResponse, 0, (int)$element->id, $element->siteId);
+        return $normalizer->normalizeAutofillResponse($rawResponse, 0, (int)$element->id, $element->siteId, $fromModel);
     }
 
     public function normalize(array $rawResponse, AiGenerationRequest $request): AiGenerationResult
@@ -84,6 +90,7 @@ class AiResponseNormalizer extends Component
         int $fieldId,
         ?int $entryId = null,
         ?int $siteId = null,
+        bool $fromModel = false,
     ): AiGenerationResult
     {
         try {
@@ -107,6 +114,7 @@ class AiResponseNormalizer extends Component
         }
 
         $suggestions = [];
+        $droppedRelatedTitles = [];
         $targetFieldMap = $this->buildTargetFieldMap($config);
         $orderedTargetFields = $this->buildOrderedTargetFields($config);
 
@@ -119,6 +127,9 @@ class AiResponseNormalizer extends Component
 
             $hasRawValue = array_key_exists('value', $item);
             $valueIsNull = $hasRawValue && $item['value'] === null;
+            if ($fromModel && $valueIsNull) {
+                continue;
+            }
             $rawValue = $hasRawValue && !$valueIsNull ? $item['value'] : '';
             $match = $this->resolveTargetFieldMatch($fieldName, $targetFieldMap);
             $displayFieldName = trim((string)($match['name'] ?? $fieldName));
@@ -137,6 +148,21 @@ class AiResponseNormalizer extends Component
 
             if ($match === null) {
                 $validationErrors[] = 'Suggestion field could not be matched to a configured field.';
+            }
+
+            if ($fromModel && $validationErrors === [] && in_array($adapterKey, ['categories', 'tags', 'entries'], true)) {
+                $pruned = $this->pruneRelatedTitles($autofillField, $targetFieldUid, $rawValue);
+                if ($pruned !== null) {
+                    $droppedRelatedTitles[] = [
+                        'fieldName' => $displayFieldName,
+                        'targetFieldUid' => $targetFieldUid,
+                        'titles' => $pruned['dropped'],
+                        'suggestionSkipped' => $pruned['titles'] === [],
+                    ];
+                    // Never treat a response containing only unavailable titles as an instruction to clear a field.
+                    if ($pruned['titles'] === []) continue;
+                    $rawValue = $pruned['titles'];
+                }
             }
 
             $value = $this->normalizeSuggestionValue($autofillField, $targetFieldUid, $rawValue, $fieldContract);
@@ -180,8 +206,24 @@ class AiResponseNormalizer extends Component
         return new AiGenerationResult([
             'success' => true,
             'suggestions' => $suggestions,
+            'droppedRelatedTitles' => $droppedRelatedTitles,
             'error' => null,
         ]);
+    }
+
+    private function pruneRelatedTitles(?AutofillField $definition, string $uid, mixed $value): ?array
+    {
+        $field = $this->getCustomField($definition, $uid);
+        if (!$field instanceof FieldInterface) {
+            return null;
+        }
+        $adapter = AutofillPlugin::getInstance()->getFieldAdapterService()->getAdapterForField($field);
+        try {
+            return $adapter instanceof AbstractRelatedElementsFieldAdapter ? $adapter->pruneUnavailableTitles($field, $value) : null;
+        } catch (Throwable) {
+            // Fall back to strict validation when choices could not be looked up.
+            return null;
+        }
     }
 
     private function extractText(array $rawResponse): ?string
@@ -483,6 +525,10 @@ class AiResponseNormalizer extends Component
             $adapter = AutofillPlugin::getInstance()->getFieldAdapterService()->getAdapterForField($field);
             if ($adapter !== null) {
                 try {
+                    if ($adapter instanceof AbstractRelatedElementsFieldAdapter) {
+                        return $adapter->suggestionValidationErrors($field, $rawValue)
+                            ?: $adapter->suggestionValidationErrors($field, $normalizedValue);
+                    }
                     if (!$adapter->validateSuggestion($field, $rawValue) || !$adapter->validateSuggestion($field, $normalizedValue)) {
                         $errors[] = 'Suggestion value is not valid for this field type.';
                     }
@@ -774,6 +820,11 @@ class AiResponseNormalizer extends Component
     {
         $type = (string)($fieldContract['type'] ?? 'string');
 
+        if (($fieldContract['format'] ?? '') === 'date-time' && is_string($value)) {
+            $date = DateFieldAdapter::parseDateTime($value, new \DateTimeZone(Craft::$app->getTimeZone()));
+            return $date?->format(\DateTimeInterface::ATOM) ?? trim($value);
+        }
+
         if ($type === 'number') {
             return $this->normalizeNumber($value);
         }
@@ -838,7 +889,11 @@ class AiResponseNormalizer extends Component
         }
 
         $format = (string)($fieldContract['format'] ?? '');
-        if (in_array($format, ['date', 'date-time'], true) && (!is_string($rawValue) || !(new \jtdev\craftautofill\services\fields\adapters\DateFieldAdapter())->validateSuggestion(new \craft\fields\Date(['showTime' => $format === 'date-time']), $rawValue))) {
+        if ($format === 'date-time' && (!is_string($rawValue) || DateFieldAdapter::parseDateTime($normalizedValue) === null)) {
+            $errors[] = 'Suggestion value must be a valid date.';
+        }
+
+        if ($format === 'date' && (!is_string($rawValue) || !(new DateFieldAdapter())->validateSuggestion(new \craft\fields\Date(['showTime' => false]), $rawValue))) {
             $errors[] = 'Suggestion value must be a valid date.';
         }
 

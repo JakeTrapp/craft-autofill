@@ -24,9 +24,12 @@ class WorkflowsController extends Controller
         $this->requireCpRequest();
         $this->requirePermission('accessPlugin-autofill');
 
-        return $this->redirect(UrlHelper::cpUrl(
-            'autofill/workflows',
-        ));
+        $plugin = AutofillPlugin::getInstance();
+        $actor = Craft::$app->getUser()->getIdentity();
+        $hasPendingReview = $plugin->isProEdition() && $actor !== null
+            && $plugin->getWorkflowRunService()->actionableCount($actor) > 0;
+
+        return $this->redirect(UrlHelper::cpUrl($hasPendingReview ? 'autofill/inbox' : 'autofill/workflows'));
     }
 
     public function actionIndex(): Response

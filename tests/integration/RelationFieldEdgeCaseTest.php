@@ -22,6 +22,7 @@ use craft\models\CategoryGroup_SiteSettings;
 use craft\models\FieldLayout;
 use craft\models\FieldLayoutTab;
 use craft\models\TagGroup;
+use jtdev\craftautofill\AutofillPlugin;
 use jtdev\craftautofill\services\fields\adapters\AssetsFieldAdapter;
 use jtdev\craftautofill\services\fields\adapters\CategoriesFieldAdapter;
 use jtdev\craftautofill\services\fields\adapters\EntriesFieldAdapter;
@@ -138,6 +139,23 @@ final class RelationFieldEdgeCaseTest extends Unit
         self::save($project['entry']);
         $saved = TestProject::reloadEntry($project['entry']);
         self::assertSame([(int)$allowed['tag']->id], array_map(static fn(Tag $e): int => (int)$e->id, $saved->getFieldValue($project['target']->handle)->all()));
+
+        $normalizer = AutofillPlugin::getInstance()->getAiService()->responseNormalizer;
+        $normalize = static fn(array $titles, bool $fromModel) => $normalizer->normalizeForElement(
+            json_encode(['suggestions' => [['fieldName' => $project['targetUid'], 'value' => ['selectedTitles' => $titles]]]], JSON_THROW_ON_ERROR),
+            $project['autofill'],
+            $saved,
+            $fromModel,
+        );
+        $partial = $normalize(['Allowed tag', 'Other tag', 'Deleted tag'], true);
+        self::assertSame(['Allowed tag'], $partial->suggestions[0]['value']);
+        self::assertSame([], $partial->suggestions[0]['validationErrors']);
+        self::assertSame(['Other tag', 'Deleted tag'], $partial->droppedRelatedTitles[0]['titles']);
+        self::assertFalse($partial->droppedRelatedTitles[0]['suggestionSkipped']);
+        $missing = $normalize(['Deleted tag'], true);
+        self::assertSame([], $missing->suggestions);
+        self::assertTrue($missing->droppedRelatedTitles[0]['suggestionSkipped']);
+        self::assertStringContainsString('Deleted tag', $normalize(['Allowed tag', 'Deleted tag'], false)->suggestions[0]['validationErrors'][0]);
     }
 
     public function testAssetsSaveAndReloadAndRejectWrongVolumeOrDeletedIds(): void

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\integration;
 
 use Codeception\Test\Unit;
+use craft\fields\Assets;
 use craft\fields\PlainText;
 use craft\fields\Table;
 use jtdev\craftautofill\AutofillPlugin;
@@ -49,6 +50,13 @@ final class EditionAndAdapterTest extends Unit
         self::assertNotNull($adapter);
         self::assertSame('table', $adapter->getKey());
         self::assertFalse($adapter->isAvailableInLiteVersion());
+    }
+
+    public function testAssetsAdapterIsAvailableInLite(): void
+    {
+        $adapter = AutofillPlugin::getInstance()->getFieldAdapterService()->getAdapterForField(new Assets());
+        self::assertNotNull($adapter);
+        self::assertTrue($adapter->isAvailableInLiteVersion());
     }
 
     public function testOptionalCkeditorAndSeomaticAdaptersAreRegistered(): void

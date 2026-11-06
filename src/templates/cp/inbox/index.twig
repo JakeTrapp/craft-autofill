@@ -16,36 +16,74 @@
 {% endblock %}
 
 {% block content %}
-    <div id="autofill-inbox-admin-table"></div>
+    <div data-autofill-inbox>
+        <div id="autofill-inbox-admin-table"></div>
+    </div>
 {% endblock %}
 
 {% set tableData = [] %}
 {% for run in runs %}
+    {% set statusLabel = run.status == 'ready' ? 'Review'|t('autofill') : statuses[run.status]|t('autofill') %}
+    {% set statusCell %}
+        {{ statusLabel }}
+        {% if run.error %}<div class="smalltext error">{{ run.error }}</div>{% endif %}
+    {% endset %}
+    {% set dismissButton %}
+        {% if run.canCancel %}
+            <button type="button" class="btn small" data-autofill-dismiss="{{ run.id }}" aria-label="{{ 'Dismiss run for {title}'|t('autofill', {title: run.elementTitle}) }}" title="{{ 'Dismiss run'|t('autofill') }}">
+                <span class="cp-icon" aria-hidden="true">{{ iconSvg('xmark') }}</span>
+            </button>
+        {% endif %}
+    {% endset %}
     {% set tableData = tableData|merge([{
         id: run.id, title: run.elementTitle, url: url('autofill/inbox/' ~ run.id),
         workflow: run.workflowName,
-        contentType: run.elementType == 'asset' ? 'Assets'|t('app') : 'Entries'|t('app'),
-        statusLabel: statuses[run.status]|t('autofill'),
-        menu: {showItems: false, label: 'View results'|t('autofill'), url: url('autofill/inbox/' ~ run.id)},
-        detail: {title: 'Error'|t('app'), content: run.error ? {'Error' : run.error} : '', showAsList: true},
+        initiator: initiators[run.initiatorId].name ?? 'Unknown user'|t('autofill'),
+        statusLabel: statusLabel,
+        statusCell: statusCell|trim,
+        dismissButton: dismissButton|trim,
     }]) %}
 {% endfor %}
 
+{% css %}
+    [data-autofill-inbox] tbody tr { cursor: pointer; }
+{% endcss %}
+
 {% js %}
+    {% include 'autofill/cp/_request.js.twig' %}
     new Craft.VueAdminTable({
         container: '#autofill-inbox-admin-table',
         columns: [
             {name: '__slot:title', title: {{ 'Content'|t('app')|json_encode|raw }}},
             {name: 'workflow', title: {{ 'Workflow'|t('autofill')|json_encode|raw }}, callback: Craft.escapeHtml},
-            {name: 'contentType', title: {{ 'Content type'|t('autofill')|json_encode|raw }}, callback: Craft.escapeHtml},
-            {name: 'statusLabel', title: {{ 'Status'|t('app')|json_encode|raw }}, callback: Craft.escapeHtml},
-            {name: '__slot:menu', title: ''},
-            {name: '__slot:detail', title: ''},
+            {name: 'initiator', title: {{ 'Started by'|t('autofill')|json_encode|raw }}, callback: Craft.escapeHtml},
+            {name: 'statusCell', title: {{ 'Status'|t('app')|json_encode|raw }}},
+            {name: 'dismissButton', title: ''},
         ],
         tableData: {{ tableData|json_encode|raw }},
         search: true,
-        searchParams: ['title', 'workflow', 'contentType', 'statusLabel'],
+        searchParams: ['title', 'workflow', 'initiator', 'statusLabel'],
+        onRowClicked: (row, event) => {
+            if (!(event.target instanceof Element) || event.target.closest('a, button')) return;
+            window.location.assign(row.url);
+        },
         itemLabels: {singular: {{ 'run'|t('autofill')|json_encode|raw }}, plural: {{ 'runs'|t('autofill')|json_encode|raw }}},
         emptyMessage: {{ 'No runs in this view.'|t('autofill')|json_encode|raw }},
+    });
+
+    document.querySelector('[data-autofill-inbox]')?.addEventListener('click', async (event) => {
+        const button = event.target instanceof Element ? event.target.closest('[data-autofill-dismiss]') : null;
+        if (!(button instanceof HTMLButtonElement) || button.disabled) return;
+        if (!window.confirm({{ 'Dismiss this run? Applied values stay saved and run history is retained.'|t('autofill')|json_encode|raw }})) return;
+
+        button.disabled = true;
+        const fallbackMessage = {{ 'Could not dismiss the run.'|t('autofill')|json_encode|raw }};
+        try {
+            await window.AutofillInputRuntime.postJson('autofill/workflow-run/cancel', {runId: Number(button.dataset.autofillDismiss)}, fallbackMessage);
+            window.location.reload();
+        } catch (error) {
+            Craft.cp.displayError(error.message || fallbackMessage);
+            button.disabled = false;
+        }
     });
 {% endjs %}

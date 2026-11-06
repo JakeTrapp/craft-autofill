@@ -11,6 +11,7 @@ class AiGenerationResult extends Model
     public bool $success = false;
     // Normalized field-value map from parsed JSON response, ready for adapter validation.
     public array $suggestions = [];
+    public array $droppedRelatedTitles = [];
     public ?float $confidence = null;
     public ?string $error = null;
 
@@ -18,7 +19,7 @@ class AiGenerationResult extends Model
     {
         return [
             ['success', 'boolean'],
-            ['suggestions', 'safe'],
+            [['suggestions', 'droppedRelatedTitles'], 'safe'],
             ['confidence', 'number'],
             ['error', 'string'],
         ];

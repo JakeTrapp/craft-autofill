@@ -396,6 +396,12 @@
             teardown();
         };
 
+        const showDecisionError = (message) => {
+            if (!(modalState.errors instanceof HTMLElement)) return;
+            modalState.errors.textContent = message;
+            modalState.errors.hidden = false;
+        };
+
         const handleDocumentClick = async (event) => {
             const target = event.target;
             if (!(target instanceof HTMLElement) || !(modalState.modal instanceof HTMLElement)) {
@@ -440,8 +446,7 @@
                     if (!suggestions.length) finishReview({ reloadPage: true });
                     else { currentIndex = Math.min(currentIndex, suggestions.length - 1); renderCurrent(); }
                 } catch (error) {
-                    current.validationErrors = [...(current.validationErrors || []), error.message || 'Could not reject this result.'];
-                    renderCurrent();
+                    showDecisionError(error.message || 'Could not reject this result.');
                 }
                 return;
             }
@@ -466,10 +471,7 @@
                             value: current.value,
                         });
                     } catch (error) {
-                        const existing = Array.isArray(current.validationErrors) ? current.validationErrors : [];
-                        const message = error instanceof Error ? error.message : 'Suggestion could not be applied to the matched field.';
-                        current.validationErrors = [...existing, message];
-                        renderCurrent();
+                        showDecisionError(error.message || 'Suggestion could not be applied to the matched field.');
                         return;
                     }
                 }

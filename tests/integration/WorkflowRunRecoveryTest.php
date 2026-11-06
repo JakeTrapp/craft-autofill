@@ -76,6 +76,63 @@ final class WorkflowRunRecoveryTest extends Unit
         });
     }
 
+    public function testRepairRunsOnceBeforeReviewAndKeepsValidSiblings(): void
+    {
+        $this->scenario(function($plugin, $workflow, $fixture, $actor, $provider) {
+            $workflow->globalPrompt = 'Original context for the repair.';
+            $workflow->rows[] = ['targetFieldUid' => '__native__:title', 'requiresApproval' => true, 'prompt' => 'Suggest a title.'];
+            $workflow->rows[] = ['targetFieldUid' => '__native__:slug', 'requiresApproval' => true, 'prompt' => 'Suggest a slug.'];
+            self::assertTrue($plugin->getWorkflowService()->saveWorkflow($workflow));
+            $provider->responses = [
+                [
+                    ['fieldName' => 'recoveryTarget', 'value' => ['bad' => 'shape']],
+                    ['fieldName' => 'title', 'value' => null],
+                    ['fieldName' => 'slug', 'value' => 'original-slug'],
+                ],
+                [
+                    ['fieldName' => 'recoveryTarget', 'value' => 'Repaired value'],
+                    ['fieldName' => 'slug', 'value' => 'unsolicited-replacement'],
+                ],
+            ];
+            $service = $plugin->getWorkflowRunService();
+            $run = $service->start($workflow, $fixture['entry'], $actor);
+            $service->process((int)$run->id);
+            $run = WorkflowRunRecord::findOne($run->id);
+            self::assertSame('ready', $run->status);
+            self::assertSame(2, $provider->calls);
+            self::assertSame('recovery-model', $provider->lastRequest->modelConfigUid);
+            self::assertSame([$fixture['targetUid']], $provider->lastRequest->context['validationRepair']);
+            self::assertStringContainsString('Original context for the repair.', $provider->lastRequest->messages[1]['content']);
+            self::assertStringContainsString('Suggestion value is not valid', $provider->lastRequest->messages[1]['content']);
+            $suggestions = array_column($service->payload($run, $actor)['suggestions'], 'value', 'targetFieldUid');
+            self::assertSame([$fixture['targetUid'] => 'Repaired value', '__native__:slug' => 'original-slug'], $suggestions);
+        });
+    }
+
+    public function testPublicWorkflowAccessDoesNotExposeAnotherUsersRunWithoutReviewOthers(): void
+    {
+        $this->scenario(function($plugin, $workflow, $fixture, $admin) {
+            $editor = $this->editor($fixture);
+            $permissions = Craft::$app->getUserPermissions()->getPermissionsByUserId((int)$editor->id);
+            self::assertTrue(Craft::$app->getUserPermissions()->saveUserPermissions((int)$editor->id, array_values(array_diff($permissions, ['autofill-reviewothers']))));
+            self::assertFalse($editor->can('autofill-reviewOthers'));
+            $workflow->visibility = 'public';
+            self::assertTrue($plugin->getWorkflowService()->saveWorkflow($workflow));
+            $service = $plugin->getWorkflowRunService();
+            $adminRun = $service->start($workflow, $fixture['entry'], $admin);
+            $service->process((int)$adminRun->id);
+            $adminRun = WorkflowRunRecord::findOne($adminRun->id);
+            self::assertTrue($plugin->getWorkflowAccess()->canView($workflow, $editor));
+            self::assertFalse($service->canView($adminRun, $editor));
+            self::assertNull($service->current((int)$workflow->id, (int)$fixture['entry']->id, $fixture['siteId'], $editor));
+            self::assertSame([], $service->pendingForElement((int)$fixture['entry']->id, $fixture['siteId'], $editor));
+            self::assertSame(0, $service->actionableCount($editor));
+            $ownRun = $service->start($workflow, $fixture['entry'], $editor);
+            self::assertNotSame($adminRun->id, $ownRun->id);
+            self::assertTrue($service->canView($ownRun, $editor));
+        });
+    }
+
     public function testRegenerationRetainsPrivateHistoryAndUsesCurrentDefinition(): void
     {
         $this->scenario(function($plugin, $workflow, $fixture, $actor, $provider) {
@@ -376,8 +433,9 @@ final class WorkflowRunRecoveryTest extends Unit
         $this->scenario(function($plugin, $workflow, $fixture, $admin) {
             $creator = $this->editor($fixture);
             $permissions = Craft::$app->getUserPermissions()->getPermissionsByUserId((int)$creator->id);
-            $permissions = array_values(array_diff($permissions, ['autofill-reviewOthers']));
+            $permissions = array_values(array_diff($permissions, ['autofill-reviewothers']));
             self::assertTrue(Craft::$app->getUserPermissions()->saveUserPermissions((int)$creator->id, $permissions));
+            self::assertFalse($creator->can('autofill-reviewOthers'));
             $workflow->ownerId = (int)$creator->id;
             self::assertTrue($plugin->getWorkflowService()->saveWorkflow($workflow));
             $service = $plugin->getWorkflowRunService();
@@ -475,12 +533,16 @@ final class RecoveryFixtureProvider implements AiProviderInterface
     public int $calls = 0;
     public ?Closure $onGenerate = null;
     public ?AiGenerationRequest $lastRequest = null;
+    public array $responses = [];
     public function getProviderKey(): string { return 'openai'; }
     public function generate(AiGenerationRequest $request, Model $providerConfig): array
     {
         $this->calls++;
         $this->lastRequest = $request;
         if ($this->onGenerate) ($this->onGenerate)();
+        if (isset($this->responses[$this->calls - 1])) {
+            return ['output_text' => Json::encode(['suggestions' => $this->responses[$this->calls - 1]])];
+        }
         return ['output_text' => '{"suggestions":[{"fieldName":"recoveryTarget","value":"Recovery fixture value"}]}'];
     }
 }

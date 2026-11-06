@@ -10,6 +10,7 @@ use craft\base\FieldInterface;
 use craft\db\Table;
 use craft\elements\Entry;
 use craft\fields\BaseRelationField;
+use craft\helpers\Json;
 use yii\base\InvalidConfigException;
 
 abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterface
@@ -71,6 +72,7 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
                 'Return JSON only.',
                 'Return an object with a selectedTitles array.',
                 'Each selected title must exactly match one candidate title.',
+                'Omit choices that have no exact match in the candidate list.',
                 $maxRule,
             ],
             'properties' => [
@@ -101,24 +103,56 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
 
     public function validateSuggestion(FieldInterface $field, mixed $value): bool
     {
+        return $this->suggestionValidationErrors($field, $value) === [];
+    }
+
+    /** @return array{titles: string[], dropped: string[]}|null */
+    public function pruneUnavailableTitles(FieldInterface $field, mixed $value): ?array
+    {
+        if (is_string($value)) {
+            $value = json_decode($value, true);
+        }
+        $rawTitles = $this->rawSuggestedTitles($value);
+        if ($rawTitles === null || array_filter($rawTitles, static fn($title) => !is_string($title) || trim($title) === '')) {
+            return null;
+        }
+
+        $titles = $this->normalizeSuggestion($field, $value);
+        $matched = $this->resolveTitleIds($field, $titles, ignoreQueryFailure: false);
+        $dropped = array_diff($titles, array_keys($matched));
+        if ($dropped === []) {
+            return null;
+        }
+
+        return ['titles' => array_values(array_diff($titles, $dropped)), 'dropped' => array_values($dropped)];
+    }
+
+    /** @return string[] */
+    public function suggestionValidationErrors(FieldInterface $field, mixed $value): array
+    {
         $rawTitles = $this->rawSuggestedTitles($value);
         if ($rawTitles === null) {
-            return false;
+            return ['Return a selectedTitles array of exact titles.'];
         }
         foreach ($rawTitles as $title) {
             if (!is_string($title) || trim($title) === '') {
-                return false;
+                return ['Each selected title must be nonempty text.'];
             }
         }
         $titles = $this->normalizeSuggestion($field, $value);
         if (!is_array($titles)) {
-            return false;
+            return ['Return a selectedTitles array of exact titles.'];
         }
+        $errors = [];
         $max = $this->maxSelections($field);
         if ($max !== null && count($titles) > $max) {
-            return false;
+            $errors[] = sprintf('This field allows at most %d selections. The suggestion contains %d.', $max, count($titles));
         }
-        return count($this->matchTitlesToIds($field, $titles)) === count($titles);
+        $unmatched = array_values(array_diff($titles, array_keys($this->resolveTitleIds($field, $titles))));
+        if ($unmatched !== []) {
+            $errors[] = sprintf('These titles could not be matched to unique choices in this field: %s. Remove them or use exact candidate titles.', Json::encode($unmatched));
+        }
+        return $errors;
     }
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
@@ -305,6 +339,12 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
      */
     protected function matchTitlesToIds(FieldInterface $field, array $titles): array
     {
+        return array_values($this->resolveTitleIds($field, $titles));
+    }
+
+    /** @return array<int|string,int> */
+    private function resolveTitleIds(FieldInterface $field, array $titles, bool $ignoreQueryFailure = true): array
+    {
         if ($titles === []) {
             return [];
         }
@@ -314,7 +354,8 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
 
         try {
             $elements = $query->all();
-        } catch (\Throwable) {
+        } catch (\Throwable $error) {
+            if (!$ignoreQueryFailure) throw $error;
             return [];
         }
 
@@ -351,7 +392,7 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
 
             $id = $candidateIds[0];
             if (!in_array($id, $matched, true)) {
-                $matched[] = $id;
+                $matched[$title] = $id;
             }
         }
 

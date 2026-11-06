@@ -44,6 +44,14 @@ const workflow = reactive<Workflow>(opts.workflow || {
   globalPrompt: '', actionButtonLabel: '', showUserPromptInput: true, showOnSidebar: false,
   visibility: 'private', rows: [], contextRows: [],
 });
+const newWorkflowSidebarChoice = ref<boolean>();
+const showOnSidebar = computed({
+  get: () => workflow.id ? workflow.showOnSidebar : (newWorkflowSidebarChoice.value ?? (workflow.scope === 'asset')),
+  set: (checked: boolean) => {
+    if (workflow.id) workflow.showOnSidebar = checked;
+    else newWorkflowSidebarChoice.value = checked;
+  },
+});
 const protectedRows = new Map<string, any>((opts.workflow?.rows || [])
   .filter((row: any) => opts.workflow?.canConfigureAutomatic === false && row.requiresApproval === false)
   .map((row: any) => [row.targetFieldUid, JSON.parse(JSON.stringify(row))]));
@@ -145,7 +153,10 @@ function chooseField(field: FieldOption) {
     workflow.rows.push({ ...freshRow(), targetFieldUid: field.uid });
     expandedOutputs.add(workflow.rows[workflow.rows.length - 1]);
   } else {
-    workflow.contextRows.push({ fieldUid: field.uid, prompt: '', enabled: true, assets: { metadata: ['title', 'filename'], includeFile: false, maxFiles: 1 } });
+    workflow.contextRows.push({
+      fieldUid: field.uid, prompt: '', enabled: true,
+      assets: { metadata: ['title', 'filename'], includeFile: field.adapter === 'assets', maxFiles: 1 },
+    });
     expandedContexts.add(workflow.contextRows[workflow.contextRows.length - 1]);
   }
   pendingFieldFocus = mode;
@@ -201,6 +212,7 @@ async function save() {
   busy.value = true; errors.value = {}; status.value = '';
   try {
     const payload = JSON.parse(JSON.stringify(workflow));
+    payload.showOnSidebar = showOnSidebar.value;
     payload.rows = payload.rows.map((row: any) => ({ ...row,
       requiresApproval: bool(row.requiresApproval), includeCurrentFieldValue: bool(row.includeCurrentFieldValue),
       overrideCurrentValue: bool(row.overrideCurrentValue), enabled: bool(row.enabled),
@@ -377,7 +389,7 @@ function updateValue(target: any, key: string, event: Event, numeric = false) {
           <summary>Advanced</summary>
           <div class="af-disclosure-body af-advanced-fields">
             <div class="af-label-line">
-              <Checkbox class="af-toggle" :checked="workflow.showOnSidebar" @update:checked="workflow.showOnSidebar = $event">{{ workflow.scope === 'entry' ? 'Show this workflow in the entry sidebar' : 'Show this workflow in the asset sidebar' }}</Checkbox>
+              <Checkbox class="af-toggle" v-model:checked="showOnSidebar">{{ workflow.scope === 'entry' ? 'Show this workflow in the entry sidebar' : 'Show this workflow in the asset sidebar' }}</Checkbox>
               <HelpTip label="About sidebar placement" text="Shows the workflow on matching content editors. It can also be attached to an inline Autofill field." />
             </div>
             <label><span class="af-label-line"><span class="af-label">Model</span><HelpTip label="About workflow models" text="Use the site’s default model or choose an enabled configuration from Autofill settings." /></span><div class="select fullwidth"><select v-model="workflow.modelConfigUid"><option value="">Default model</option><option v-for="model in opts.modelConfigs" :key="model.uid" :value="model.uid">{{ model.label || model.modelId || model.provider }}</option></select></div></label>

@@ -404,6 +404,17 @@ test('mixed invalid results can be corrected or skipped without losing valid sug
 test('Pro inbox and workflow-based asset bulk screen render', async ({ page }) => {
   const data = fixture();
   await login(page, data);
+  await page.goto('/admin/autofill/workflows/new');
+  await page.getByRole('combobox', { name: 'Content', exact: true }).selectOption('asset');
+  await page.locator('.af-settings-disclosure > summary').click();
+  await expect(page.getByRole('checkbox', { name: 'Show this workflow in the asset sidebar' })).toBeChecked();
+  const volume = page.getByRole('combobox', { name: 'Asset volume' });
+  await volume.selectOption({ index: 1 });
+  await addWorkflowField(page, 'context', 'This asset’s file');
+  const assetContext = page.locator('#workflow-source .af-sort-item').last();
+  await assetContext.getByText('Advanced', { exact: true }).click();
+  await expect(assetContext.getByRole('checkbox', { name: 'Include file content' })).toBeChecked();
+
   await page.goto(data.assetEditorPath);
   const config = JSON.parse((await page.locator('[data-autofill-runtime]').first().getAttribute('data-autofill-config')) ?? '{}');
   await page.goto(`/admin/autofill/bulk?workflow=${encodeURIComponent(config.workflowHandle)}`);
@@ -439,14 +450,22 @@ test('bulk asset generation persists results and supports review from the inbox'
     return data.runIds[0] as number;
   }, { handle: config.workflowHandle, assetId: data.bulkAsset.id, siteId: data.siteId });
   await expectRunReady(page, runId);
-  await page.goto('/admin/autofill/inbox');
+  await page.goto('/admin/autofill');
+  await expect(page).toHaveURL(/\/admin\/autofill\/inbox$/);
+  await expect(page.getByRole('columnheader', { name: 'Started by' })).toBeVisible();
   const row = page.getByRole('row').filter({
-    has: page.getByRole('link', { name: 'View results' }).and(page.locator(`[href$="/autofill/inbox/${runId}"]`)),
+    has: page.locator(`[href$="/autofill/inbox/${runId}"]`),
   });
   await expect(row).toContainText('Browser asset workflow');
+  await expect(row.getByRole('cell', { name: data.username, exact: true })).toBeVisible();
+  await expect(row.getByText('Review', { exact: true })).toBeVisible();
+  await expect(row.getByRole('link', { name: 'View results' })).toHaveCount(0);
   await expect(row).toBeVisible();
   await page.screenshot({ path: 'tests/browser/artifacts/workflow-inbox.png', fullPage: true });
-  await row.getByRole('link', { name: 'View results' }).click();
+  page.once('dialog', dialog => dialog.dismiss());
+  await row.getByRole('button', { name: /^Dismiss run/ }).click();
+  await expect(row).toBeVisible();
+  await row.getByRole('cell', { name: 'Browser asset workflow', exact: true }).click();
   // Inbox links open the real asset editor and its review immediately.
   await expect(page).toHaveURL(new RegExp(data.bulkAsset.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\?|$)'));
   const modal = page.locator('[data-autofill-review-modal]:not([hidden])');
@@ -460,8 +479,14 @@ test('bulk asset generation persists results and supports review from the inbox'
   await expect(runtime.locator('[data-autofill-generate]')).toHaveText('Review results');
   await runtime.locator('[data-autofill-generate]').click();
   await expect(modal).toHaveJSProperty('open', true);
+  let rejectedSecurityToken = false;
+  await page.route(url => (url.searchParams.get('p') ?? url.pathname).endsWith('/autofill/workflow-run/decide'), async route => {
+    rejectedSecurityToken = true;
+    await route.fulfill({ status: 400, json: { message: 'Unable to verify your data submission.' } });
+  }, { times: 1 });
   await modal.locator('[data-autofill-reject]').click();
   await expect(modal.locator('[data-autofill-review-field]')).toContainText(/caption/i);
+  expect(rejectedSecurityToken).toBe(true);
   const reload = page.waitForEvent('framenavigated', { predicate: frame => frame === page.mainFrame() });
   await modal.locator('[data-autofill-accept]').click();
   await reload;
@@ -575,6 +600,11 @@ test('archived workflow leaves pending review available from the original conten
   await page.getByRole('button', { name: 'Workflow actions' }).click();
   await page.getByText('Archive workflow', { exact: true }).click();
   await expect(page.getByText('This workflow is archived.', { exact: true })).toBeVisible();
+  await page.goto('/admin/autofill/workflows');
+  const workflowLink = page.locator(`a[href$="/autofill/workflows/edit/${config.workflowHandle}"]`);
+  await expect(workflowLink).toHaveCount(0);
+  await page.getByRole('link', { name: 'Archived', exact: true }).click();
+  await expect(workflowLink).toBeVisible();
   await page.goto(data.archiveAsset.path);
   const recovery = page.locator(`[data-autofill-runtime][data-autofill-config*='"selectedRunId":${runId}']`);
   await expect(recovery).toHaveCount(1);
@@ -589,6 +619,12 @@ test('archived workflow leaves pending review available from the original conten
   await page.reload();
   await expect(page.getByText('This workflow is archived.', { exact: true })).toBeHidden();
   await expectRunReady(page, runId);
+  await page.goto('/admin/autofill/inbox');
+  const dismiss = page.locator(`[data-autofill-dismiss="${runId}"]`);
+  await expect(dismiss).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await dismiss.click();
+  await expect(dismiss).toHaveCount(0);
 });
 
 

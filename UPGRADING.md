@@ -21,7 +21,7 @@ Administrators retain full Autofill access. For other users, enable plugin acces
 | Edit own / edit others | Change owned definitions or other users' public definitions, except administrator-managed definitions |
 | Run | Start generation on content the user can edit |
 | Bulk | Start Pro batches |
-| Review / review others | Accept or reject eligible results, including other users' public results when granted |
+| Review / review others | Accept or reject eligible results. Viewing or reviewing another user's public results also requires Review other users’ public results and View other users’ public workflows. |
 | Configure automatic application | Enable automatic application and edit existing automatic output rows |
 | Archive own / archive others | Remove eligible definitions from new-run selection |
 

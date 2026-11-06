@@ -36,7 +36,7 @@ final class PartialGenerationSafetyTest extends Unit
                 'Generate the requested values.',
             );
 
-            self::assertSame(1, $provider->calls);
+            self::assertSame(2, $provider->calls);
             self::assertCount(2, $suggestions);
             self::assertNotEmpty($suggestions[0]['validationErrors']);
             self::assertSame('Generated native title', $suggestions[1]['value']);
@@ -49,6 +49,11 @@ final class PartialGenerationSafetyTest extends Unit
             $payload = json_decode((string)$log->responsePayloadJson, true, 512, JSON_THROW_ON_ERROR);
             self::assertNotEmpty($payload['suggestions'][0]['validationErrors'] ?? []);
             self::assertSame([], $payload['suggestions'][1]['validationErrors'] ?? null);
+            $logs = AiRequestLogRecord::find()->where(['entryId' => (int)$project['entry']->id])->orderBy(['id' => SORT_ASC])->all();
+            self::assertCount(2, $logs);
+            self::assertSame(self::RAW_RESPONSE, $logs[0]->responseRawText);
+            $repairRequest = json_decode((string)$logs[1]->requestPayloadJson, true, 512, JSON_THROW_ON_ERROR);
+            self::assertSame([$project['targetUid']], $repairRequest['context']['validationRepair']);
         } finally {
             $this->restoreFixtureProvider($settings, $previousConfigs);
         }
@@ -94,7 +99,7 @@ final class PartialGenerationSafetyTest extends Unit
                 (int)\craft\elements\User::find()->admin()->one()->id,
             );
 
-            self::assertSame(1, $provider->calls, 'Generation should make one provider call; applying siblings must not trigger another.');
+            self::assertSame(2, $provider->calls, 'Generation makes one repair attempt and applying siblings adds no calls.');
             self::assertFalse($result['success']);
             self::assertSame(1, $result['suggestionsApplied']);
             self::assertStringContainsString('Safety Target', (string)$result['error']);

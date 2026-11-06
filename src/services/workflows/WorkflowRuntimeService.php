@@ -17,6 +17,9 @@ use craft\helpers\Json;
 use jtdev\craftautofill\AutofillPlugin;
 use jtdev\craftautofill\fields\AutofillField;
 use jtdev\craftautofill\models\Workflow;
+use jtdev\craftautofill\models\ai\AiGenerationRequest;
+use jtdev\craftautofill\models\ai\AiGenerationResult;
+use jtdev\craftautofill\models\ai\AiModelConfig;
 use jtdev\craftautofill\services\ai\AutofillFieldConfigBuilder;
 use jtdev\craftautofill\services\assets\AssetInputService;
 use RuntimeException;
@@ -106,13 +109,23 @@ class WorkflowRuntimeService extends Component
         return $this->withActor($actor, fn(): string => AutofillPlugin::getInstance()->getAiService()->promptBuilder->buildForElementPrompt($userPrompt, $definition, $element));
     }
 
-    public function generate(AutofillField $definition, ElementInterface $element, string $userPrompt, ?User $actor = null): array
-    {
-        return $this->withActor($actor, fn(): array => $this->generateForActor($definition, $element, $userPrompt, $actor));
+    public function generate(
+        AutofillField $definition,
+        ElementInterface $element,
+        string $userPrompt,
+        ?User $actor = null,
+        ?callable $beforeRepair = null,
+    ): array {
+        return $this->withActor($actor, fn(): array => $this->generateForActor($definition, $element, $userPrompt, $actor, $beforeRepair));
     }
 
-    private function generateForActor(AutofillField $definition, ElementInterface $element, string $userPrompt, ?User $actor = null): array
-    {
+    private function generateForActor(
+        AutofillField $definition,
+        ElementInterface $element,
+        string $userPrompt,
+        ?User $actor,
+        ?callable $beforeRepair,
+    ): array {
         $plugin = AutofillPlugin::getInstance();
         $model = $this->modelForDefinition($definition);
         if ($actor !== null) $definition = $this->definitionForActor($definition, $element, $actor);
@@ -131,8 +144,7 @@ class WorkflowRuntimeService extends Component
             }
         }
         $request->fileInputs = $inputs['files'];
-        $started = microtime(true);
-        $logId = $plugin->getAiRequestLogService()->begin([
+        $logContext = [
             'fieldId' => $sourceFieldId,
             'entryId' => $element instanceof Entry ? (int)$element->id : null,
             'siteId' => $element->siteId,
@@ -140,6 +152,71 @@ class WorkflowRuntimeService extends Component
             'provider' => $model->provider,
             'modelConfigUid' => $model->uid,
             'modelId' => $model->modelId,
+        ];
+        $suggestions = $this->generateLogged($request, $model, $prompt, $logContext, $definition, $element);
+
+        $targetCounts = array_count_values(array_column($suggestions, 'targetFieldUid'));
+        $failed = [];
+        foreach ($suggestions as $index => $suggestion) {
+            $uid = $suggestion['targetFieldUid'];
+            if ($uid === '' || $targetCounts[$uid] !== 1 || $suggestion['validationErrors'] === []) {
+                continue;
+            }
+            $failed[$uid] = $index;
+        }
+        if ($failed === []) {
+            return $suggestions;
+        }
+
+        if ($beforeRepair !== null) {
+            $beforeRepair($suggestions);
+        }
+
+        try {
+            $feedback = [];
+            foreach ($failed as $uid => $index) {
+                $suggestion = $suggestions[$index];
+                $feedback[] = [
+                    'fieldName' => $uid,
+                    'fieldLabel' => $suggestion['displayFieldName'],
+                    'rejectedValue' => $suggestion['rawValue'],
+                    'normalizedValue' => $suggestion['value'],
+                    'validationErrors' => $suggestion['validationErrors'],
+                ];
+            }
+            $repairPrompt = "Correct only the failed suggestions listed below using the same source context and the corresponding field contracts above. "
+                . "Return the same JSON format with at most one suggestion per listed field. Use the supplied fieldName exactly. Omit a field if you cannot produce a valid value.\n"
+                . Json::encode($feedback);
+            $repairRequest = clone $request;
+            $repairRequest->messages[array_key_last($repairRequest->messages)]['content'] .= "\n\n" . $repairPrompt;
+            $repairRequest->context['validationRepair'] = array_keys($failed);
+
+            $repairs = $this->generateLogged($repairRequest, $model, $prompt . "\n\n" . $repairPrompt, $logContext, $definition, $element);
+            $repairCounts = array_count_values(array_column($repairs, 'targetFieldUid'));
+            foreach ($repairs as $repair) {
+                $uid = $repair['targetFieldUid'];
+                if (isset($failed[$uid]) && $repairCounts[$uid] === 1 && $repair['validationErrors'] === []) {
+                    $suggestions[$failed[$uid]] = $repair;
+                }
+            }
+        } catch (Throwable) {
+            Craft::warning('Autofill could not repair invalid suggestions. The original suggestions were kept.', __METHOD__);
+        }
+        return $suggestions;
+    }
+
+    private function generateLogged(
+        AiGenerationRequest $request,
+        AiModelConfig $model,
+        string $prompt,
+        array $logContext,
+        AutofillField $definition,
+        ElementInterface $element,
+    ): array {
+        $plugin = AutofillPlugin::getInstance();
+        $started = microtime(true);
+        $logId = $plugin->getAiRequestLogService()->begin([
+            ...$logContext,
             'requestPrompt' => $prompt,
             'requestPayloadJson' => json_encode($request->safeLogPayload(), JSON_THROW_ON_ERROR),
         ]);
@@ -151,11 +228,17 @@ class WorkflowRuntimeService extends Component
             if (!$result->success) {
                 throw new RuntimeException($result->error ?? 'AI response was invalid.');
             }
-            $suggestions = $this->normalize($text, $definition, $element);
+            $normalized = $this->normalizeResult($text, $definition, $element, fromModel: true);
+            $suggestions = $normalized->suggestions;
+            $responsePayload = ['suggestions' => $suggestions];
+            if ($normalized->droppedRelatedTitles !== []) {
+                $responsePayload['droppedRelatedTitles'] = $normalized->droppedRelatedTitles;
+            }
+            $hasInvalid = (bool)array_filter($suggestions, static fn(array $item): bool => $item['validationErrors'] !== []);
             $plugin->getAiRequestLogService()->complete($logId, [
-                'success' => !array_filter($suggestions, static fn(array $item): bool => $item['validationErrors'] !== []),
-                'errorMessage' => array_filter($suggestions, static fn(array $item): bool => $item['validationErrors'] !== []) ? 'One or more suggestions need correction. Valid suggestions remain usable.' : null,
-                'responsePayloadJson' => json_encode(['suggestions' => $suggestions], JSON_THROW_ON_ERROR),
+                'success' => !$hasInvalid,
+                'errorMessage' => $hasInvalid ? 'One or more suggestions need correction. Valid suggestions remain usable.' : null,
+                'responsePayloadJson' => json_encode($responsePayload, JSON_THROW_ON_ERROR),
                 'responseRawText' => $text,
                 'latencyMs' => (int)((microtime(true) - $started) * 1000),
                 'inputTokens' => $raw['usage']['input_tokens'] ?? null,
@@ -174,7 +257,7 @@ class WorkflowRuntimeService extends Component
         }
     }
 
-    public function modelForDefinition(AutofillField $definition): \jtdev\craftautofill\models\ai\AiModelConfig
+    public function modelForDefinition(AutofillField $definition): AiModelConfig
     {
         foreach (AutofillPlugin::getInstance()->getSettings()->modelConfigs as $row) {
             if (!($row['enabled'] ?? false)) {
@@ -213,13 +296,23 @@ class WorkflowRuntimeService extends Component
 
     public function normalize(string $raw, AutofillField $definition, ElementInterface $element): array
     {
+        return $this->normalizeResult($raw, $definition, $element)->suggestions;
+    }
+
+    private function normalizeResult(
+        string $raw,
+        AutofillField $definition,
+        ElementInterface $element,
+        bool $fromModel = false,
+    ): AiGenerationResult
+    {
         $actor = Craft::$app->getUser()->getIdentity();
         if ($actor !== null) $definition = $this->definitionForActor($definition, $element, $actor);
-        $result = AutofillPlugin::getInstance()->getAiService()->responseNormalizer->normalizeForElement($raw, $definition, $element);
+        $result = AutofillPlugin::getInstance()->getAiService()->responseNormalizer->normalizeForElement($raw, $definition, $element, $fromModel);
         if (!$result->success) {
             throw new RuntimeException($result->error ?? 'The response could not be read.');
         }
-        return $result->suggestions;
+        return $result;
     }
 
     public function normalizePreview(string $raw, AutofillField $definition, ElementInterface $element): array

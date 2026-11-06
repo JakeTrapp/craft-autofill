@@ -1,3 +1,4 @@
+{% include 'autofill/cp/_request.js.twig' %}
 (() => {
     if (window.autofillNotificationPolling) return;
     window.autofillNotificationPolling = true;
@@ -5,9 +6,7 @@
     const update = async () => {
         if (document.hidden || !window.Craft?.sendActionRequest) return;
         try {
-            const response = await Craft.sendActionRequest('POST', 'autofill/workflow-run/notifications');
-            const state = response.data;
-            if (!state.success) return;
+            const state = await window.AutofillInputRuntime.postJson('autofill/workflow-run/notifications', {}, 'Could not check Autofill notifications.');
             let previous = null;
             try { previous = JSON.parse(sessionStorage.getItem(key)); } catch (_) {}
             if (previous && state.latestId > previous.latestId) Craft.cp.displayNotice('Autofill results are ready to review.');

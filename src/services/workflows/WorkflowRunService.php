@@ -212,6 +212,11 @@ class WorkflowRunService extends Component
                 // Persist generated results before any content changes, so retries never repeat model requests unnecessarily.
                 $suggestions = $run->suggestionsJson ? Json::decode($run->suggestionsJson) : $runtime->generate(
                     $plugin->getWorkflowService()->asField($definition), $element, (string)$run->userPrompt, $actor,
+                    beforeRepair: function(array $original) use ($run): void {
+                        // An interrupted repair can resume with the original suggestions.
+                        $run->suggestionsJson = Json::encode($original);
+                        $this->saveRun($run);
+                    },
                 );
                 foreach ($suggestions as &$suggestion) $suggestion['state'] ??= 'pending';
                 unset($suggestion);
@@ -277,7 +282,10 @@ class WorkflowRunService extends Component
         $access = AutofillPlugin::getInstance()->getWorkflowAccess();
         if (!$actor->admin) {
             $own = (int)$run->initiatorId === (int)$actor->id || $this->isPrivateOwner($run, $actor);
-            if (!$access->can($actor, $own ? 'view' : 'viewOthers') || (!$own && $run->visibility !== 'public')) return false;
+            $canViewRun = $own
+                ? $access->can($actor, 'view')
+                : $run->visibility === 'public' && $access->can($actor, 'viewOthers') && $access->can($actor, 'reviewOthers');
+            if (!$canViewRun) return false;
         }
         try {
             return Craft::$app->getElements()->canView($this->element($run), $actor);

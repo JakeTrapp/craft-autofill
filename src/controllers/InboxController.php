@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace jtdev\craftautofill\controllers;
 
 use Craft;
+use craft\elements\User;
 use craft\web\Controller;
 use jtdev\craftautofill\AutofillPlugin;
 use craft\helpers\UrlHelper;
@@ -24,10 +25,12 @@ class InboxController extends Controller
         $runs = [];
         foreach (WorkflowRunRecord::find()->where(['status' => $status])->orderBy(['id' => SORT_DESC])->each() as $run) {
             if (!$service->canView($run, $actor)) continue;
-            $runs[] = $service->payload($run, $actor);
+            $runs[] = $service->payload($run, $actor) + ['initiatorId' => $run->initiatorId];
             if (count($runs) >= 100) break;
         }
-        return $this->renderTemplate('autofill/cp/inbox/index', compact('runs', 'status'));
+        $initiatorIds = array_values(array_unique(array_filter(array_column($runs, 'initiatorId'))));
+        $initiators = $initiatorIds === [] ? [] : User::find()->id($initiatorIds)->status(null)->indexBy('id')->all();
+        return $this->renderTemplate('autofill/cp/inbox/index', compact('runs', 'status', 'initiators'));
     }
 
     public function actionReview(int $runId): Response

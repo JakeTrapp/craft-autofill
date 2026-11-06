@@ -1,0 +1,53 @@
+(() => {
+    const runtime = window.AutofillInputRuntime ||= {};
+    if (runtime.requestWithSession) return;
+
+    const csrfMessage = {{ 'Unable to verify your data submission.'|t('yii')|json_encode|raw }};
+    const isCsrfRejection = (error) => error.response?.status === 400 && error.response.data?.message === csrfMessage;
+    const headers = { Accept: 'application/json' };
+    let sessionRefresh = null;
+
+    const refreshSession = async () => {
+        const { data } = await Craft.sendActionRequest('GET', 'users/session-info', {
+            headers,
+            params: { dontExtendSession: 1 },
+        });
+        if (data?.isGuest || Number(data?.id) !== Number(Craft.userId)) {
+            throw new Error('Your Craft session has changed. Sign in and reopen the editor.');
+        }
+        if (!data.csrfTokenValue) {
+            throw new Error('Craft could not refresh your security token. Reload the editor and try again.');
+        }
+        Craft.csrfTokenValue = data.csrfTokenValue;
+    };
+
+    runtime.requestWithSession = async (send) => {
+        for (let attempt = 0; ; attempt++) {
+            try {
+                return await send();
+            } catch (error) {
+                // Only retry requests Craft rejected before the action ran.
+                if (!isCsrfRejection(error)) throw error;
+                if (attempt === 2) {
+                    throw new Error('Craft could not validate your security token. Try again or reload the editor.');
+                }
+            }
+            sessionRefresh ??= refreshSession().finally(() => { sessionRefresh = null; });
+            await sessionRefresh;
+        }
+    };
+
+    runtime.postJson = async (endpoint, payload, fallbackMessage) => {
+        let data;
+        try {
+            ({ data } = await runtime.requestWithSession(() => Craft.sendActionRequest('POST', endpoint, { headers, data: payload })));
+        } catch (error) {
+            const response = error.response;
+            const requestError = new Error(response?.data?.message || response?.data?.error || error.message || fallbackMessage);
+            requestError.retryable = response?.status >= 500 || response?.status === 429 || (!response && !!error.request);
+            throw requestError;
+        }
+        if (!data?.success) throw new Error(data?.error || fallbackMessage);
+        return data;
+    };
+})();
