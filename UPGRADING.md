@@ -1,4 +1,4 @@
-# Unreleased upgrade notes
+# Upgrading to Autofill 2.0
 
 This update moves Autofill configuration into saved workflows and adds background generation, workflow permissions and persistent review results. Back up the database and Craft project config before applying the plugin migrations. Try the upgrade on a copy of an existing site first.
 

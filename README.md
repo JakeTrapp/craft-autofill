@@ -1,65 +1,50 @@
 # Autofill
 
-Autofill adds an AI-assisted field type to Craft CMS that helps editors generate, review, and apply field suggestions from entry content. Configure the fields you want Autofill to manage, add prompts and optional global context, then let editors generate suggested values from the entry edit page.
+Autofill brings AI into Craft CMS, configured around the way your team works. Create workflows for your entries and assets, give them the right context, and let editors generate field suggestions with a click.
 
-Full documentation is available at [jtdevelop.com/development/plugins/autofill](https://www.jtdevelop.com/development/plugins/autofill).
+Think of each workflow as a skill that teaches AI how to fill out a specific entry type or asset.
 
-## Requirements
+You decide what each workflow reads, which fields it can fill, and what needs review. Editors stay in Craft and keep control of the content they publish.
 
-Autofill requires Craft CMS 5.0.0 or later and PHP 8.2 or later.
+## Built for your content
 
-## Installation
+A workflow is a reusable set of instructions for a specific entry type or asset volume. Choose the fields Autofill should fill, add instructions for each one, and give the model context from existing content. Shared instructions keep guidance consistent, while optional per-run instructions let editors add details for the task at hand.
 
-You can install this plugin from the Plugin Store or with Composer.
+Choose which fields and asset details to send as context. Autofill can also use supported image and document files from existing Craft assets when the model supports them. Context fields are read-only. To suggest alt text or a caption for an asset, create a workflow for that asset volume.
 
-#### From the Plugin Store
+[Learn about workflows and launchers](https://www.jtdevelop.com/development/plugins/autofill#autofill-fields) · [See asset inputs and outputs](https://www.jtdevelop.com/development/plugins/autofill#asset-inputs) · [View supported fields](https://www.jtdevelop.com/development/plugins/autofill#supported-fields)
 
-Go to the Plugin Store in your project’s Control Panel and search for “Autofill”. Then press “Install”.
+## Review on your terms
 
-#### With Composer
+Give editors a workflow in the entry or asset sidebar, an Autofill field in the content layout, or both. They can run it with a click and keep working while Craft's queue handles generation.
 
-Open your terminal and run the following commands:
+When suggestions are ready, editors can review them on the original content, edit supported values, and accept or reject each suggestion. Choose which outputs require review and which eligible outputs can apply automatically. Closing a review leaves undecided suggestions ready for later.
+
+[See how editors use Autofill](https://www.jtdevelop.com/development/plugins/autofill#editor-workflow)
+
+## Do more with bulk
+
+Autofill Pro runs a workflow across multiple entries or assets, helping teams fill in missing content or update a collection without opening each item to start a run. The inbox brings results together and takes reviewers back to the original content to make their decisions.
+
+[Explore bulk Autofill](https://www.jtdevelop.com/development/plugins/autofill#bulk-autofill)
+
+## Share with the right people
+
+New workflows are private by default. Share a workflow with users who have the appropriate Autofill and Craft permissions. Separate permissions control who can create, edit, run, and review workflows and configure automatic application.
+
+Lite includes one saved workflow, background generation, and single-item review. Pro adds multiple workflows, bulk generation, a review inbox, and additional supported field types.
+
+[Permissions and sharing](https://www.jtdevelop.com/development/plugins/autofill#permissions) · [Compare Lite and Pro](https://www.jtdevelop.com/development/plugins/autofill#lite-vs-pro-edition)
+
+## Get started
+
+Autofill requires Craft CMS 5.0 or later, PHP 8.2 or later, an enabled AI model, and a working Craft queue. It supports OpenAI, Anthropic, DeepSeek, and Google Gemini model configurations.
+
+Install Autofill from the Craft Plugin Store, or run:
 
 ```bash
-# go to the project directory
-cd /path/to/my-project.test
-
-# tell Composer to load the plugin
 composer require jt-dev/craft-autofill
-
-# tell Craft to install the plugin
 ./craft plugin/install autofill
 ```
 
-## Development testing
-
-Run unit and Craft integration suites separately:
-
-```bash
-composer test:unit
-composer test:integration
-npm run test:browser
-```
-
-The ignored Craft runtime is generated from tracked setup recipes. Integration tests use a DDEV MySQL 8 database with an identity marker. They refuse unmarked databases and never reset the normal site database. See [`tests/README.md`](tests/README.md) for setup and safety details.
-
-Release archives exclude test sources and the generated site. Composer consumers do not inherit this plugin's development dependencies or run its test scripts. The compiled control-panel interface ships with the plugin and needs no Node build on customer sites.
-
-## Workflows
-
-Administrators and permitted editors manage configurations under **Autofill → Workflows**. Each workflow targets one entry type or asset volume and defines output instructions, read-only context, model selection, and review rules. Workflow definitions stay in the site's database and can be edited on the live site.
-
-Autofill fields reference a workflow by handle. You can deploy a field before its workflow exists: its control appears when a matching workflow is created. A workflow may also appear in the editor sidebar independently of inline fields. Lite supports one workflow.
-
-Existing field configurations are converted through Craft's normal plugin migration process. Original settings are retained in the workflow table as migration snapshots. Back up the database and project config before deploying an update, as with other Craft schema changes.
-
-Images and supported document files come from existing Craft assets. Select metadata and optional file content in the workflow's context rows. Configuring an asset workflow lets you generate that asset's configured fields, such as alt text or a caption. Using attached assets as context does not modify them.
-
-
-## Background runs and review
-
-Both editions generate through Craft's queue. The editor button shows progress and restores saved results for review when the content is reopened. Pro adds a review inbox and workflow-based bulk generation for entries and assets. Automatic outputs apply independently while review-required outputs remain pending.
-
-New workflows are private by default. Public workflows and runs are shared within Craft permissions; private runs remain restricted to their initiator and administrators. Separate permissions control creation, editing, running, reviewing and configuring automatic application. Existing upgraded workflows are public and administrator-managed.
-
-See [the unreleased upgrade notes](UPGRADING.md) for migration, queue setup, permission changes, Lite/Pro boundaries and CLI compatibility.
+[Read the documentation](https://www.jtdevelop.com/development/plugins/autofill) for setup and examples. Updating an existing installation? See the [upgrade notes](UPGRADING.md).

@@ -1,53 +1,43 @@
 # Release Notes for Autofill
-## Unreleased
 
-- Made Assets fields available for context and output in Lite as well as Pro.
-- Enabled sidebar placement by default for new asset workflows and file content by default for newly added asset context fields.
-- Opened the Pro Inbox from the main Autofill navigation when the current user has results to review. Otherwise, the link opens Workflows.
-- Added a dismiss button to Inbox rows for users who can manage the run.
-- Replaced the Inbox content type column with the name of the user who started the run. Clicking a row opens its results for review.
-- Fixed shared runs appearing in the Inbox and editor for users without permission to review other users’ public results.
-- Added recovery for Craft security-token rejections on editor, review, and notification requests. The editor resumes status checks after temporary failures, and failed review actions keep edits available for retry.
-- Used Craft's configured time zone for Post Date and Expiration Date suggestions without an offset. Edited date and time suggestions now submit with a time zone.
-- Added one repair request per run for invalid suggestions tied to a configured field. The retry uses the same model and context, sends the validation feedback, and replaces only suggestions that pass validation before review opens.
-- Kept valid Tags, Entries, and Categories selections when the model includes unavailable or ambiguous titles. Autofill records dropped titles in the request log and skips the field when no selections match.
-- Skipped fields the model returns as null. Existing values stay in place, and those fields do not require review or a repair request.
-- Compacted sidebar workflows into expandable rows with always-visible Run/Review actions, accessible regenerate/dismiss icons, and grouped workflow names. Fixed unavailable actions remaining visible due to button styles overriding hidden attributes.
-- Fixed the workflow editor form being hidden after the native-table cleanup.
-- Switched the inbox and request logs to Craft's native Vue admin tables, with native search, log pagination/sorting and expandable request details.
-- Replaced the custom workflow list with Craft's native Vue admin table, including native search, row controls and layout.
-- Reorganized workflow tables into separate content type, entry type/volume, visibility and owner columns, using the full content width and shared search controls.
-- Simplified workflow setup by grouping access and advanced settings behind compact disclosures.
-- Added optional workflow descriptions to the content editor sidebar and bulk workflow cards. Bulk Autofill now shows each workflow's inputs, outputs, and review policy before you select content.
-- Changed inbox results to open their original entry or asset and launch review immediately, with inbox navigation in the editor sidebar.
-- Fixed closing an inbox review reopening the modal after the editor refreshes.
-- Added workflow ownership, private/public visibility, administrator-managed upgrade defaults, and separate workflow permissions.
-- Added durable background-run storage, single-run queue/status/review endpoints, and per-field review decisions for Lite and Pro.
-- Added processing edit locks, archived definitions with run history, and content-change checks before automatic application.
-- Added a Pro review inbox, workflow-based entry/asset bulk runs, review navigation, in-app ready notifications and actionable inbox counts.
-- Added regeneration and dismissal with retained history, ownership transfer, and recovery of pending results when definitions become private or archived.
-- Preserved private review ownership separately from the run initiator and kept private regeneration separate from existing public results.
-- Kept conflict warnings accurate when editors change a field after Autofill has already applied it.
-- Completed runs without opening a review when all generated values already match the saved content.
-- Unified legacy bulk/CLI calls with persistent review rules. CLI runs now require an initiating user; automatic bulk execution requires acknowledgement.
-- Restricted legacy request logs to administrators and checked field/asset metadata access before generation or review.
-- Moved generation definitions into live-editable, administrator-managed workflows with handle-based field references and automatic conversion of existing configurations.
-- Added a Vue and Verbb Plugin Kit workflow editor and list, independent sidebar controls, and a Plugin Kit suggestion review dialog.
-- Required saving editor changes before generation so Autofill uses persisted content.
-- Added built-in Anthropic, DeepSeek, and Google Gemini model configurations alongside OpenAI.
-- Added asset-volume workflows, selected asset metadata and file inputs, configurable file counts, and clear unsupported-input errors. File content and temporary access links are excluded from request logs.
-- Added separate root unit, Craft integration, and Playwright browser suites, with a generated disposable Craft environment and release-package exclusions.
-- Simplified the workflows list and moved workflow actions into Craft's page header.
-- Improved workflow editing with side-by-side context and output panels, drag-and-drop ordering, compact instruction previews, field-type icons, and optional settings under Advanced.
-- Added Craft-native field selection pop-ups that create a card only after a field is selected and prevent duplicate assignments across context and outputs.
-- Added clearer dropdown controls, light help tooltips, distinct panel heading accents, and separate selection, warning, and error states.
-- Fixed new workflows starting with an unusable blank output card and Autofill's sidebar submenu collapsing on Bulk Autofill and Logs.
-- Revalidated suggestions and editor corrections on the server before saving. Missing, null, and empty results can no longer erase existing content.
-- Preserved invalid returned values and validation details for review and logging. Supported editors can correct invalid values; invalid read-only results cannot be accepted, and valid suggestions in the same response remain usable, including during bulk runs.
-- Tightened field-specific validation and safe conversions for option labels, numeric limits and precision, text limits, dates and times, countries, addresses, structured data, and relationship sources. Malformed rows and selections still require correction.
-- Fixed date-only values shifting across time zones, country-name lookup, currency values being rounded during conversion, and missing API-key environment variables causing a PHP error.
-- Expanded edge-case and Craft persistence coverage across all 26 field adapters, with a per-field coverage guide and browser checks for editable and read-only failures.
-- Expanded browser and integration coverage for workflow sharing, background runs, inbox review, and archive recovery. Added an upgrade rehearsal from 1.0.7 for Lite and Pro.
+## 2.0.0 - 2026-11-07
+
+### Added
+
+- Added a workflow editor in the control panel for configuring entry types and asset volumes. Workflows have separate context and output fields, field-specific instructions, optional editor input, model overrides, and per-field review and overwrite settings.
+- Added sidebar launchers for entries and assets. Multiple matching workflows can appear in the sidebar, and an Autofill field can launch a workflow inline by its handle.
+- Added Anthropic, DeepSeek, and Google Gemini as model providers alongside OpenAI.
+- Added support for Assets fields as context and output in both Lite and Pro. Context can include selected metadata and supported files, with a configurable asset count. Asset workflows can suggest titles, alt text, and supported custom field values.
+- Added workflow ownership and sharing. New workflows are private by default, and separate permissions govern creating, editing, running, reviewing, and configuring automatic application.
+- Added background runs with saved status and review results in both editions. Pending suggestions reopen on the original entry, draft, or asset, and editors can accept or reject each field separately.
+- Added the Pro Inbox with status filters, in-app notifications for results ready to review, and navigation to the next item from the content editor.
+- Added run regeneration and dismissal with retained history. Workflows with run history can be archived, and authorized reviewers can still access pending results.
+
+### Changed
+
+- Moved generation settings out of Autofill fields and into saved workflows. Existing fields are migrated to reference workflows by handle. Lite allows one saved workflow per installation, including archived workflows.
+- Changed Pro Bulk Autofill to run a selected workflow across entries or assets. The bulk screen previews context, outputs, and review settings before a run. Outputs that require review stay pending.
+- Updated the workflow list, Inbox, and request logs to use Craft's native tables. Request logs support search, sorting, pagination, and expandable request details.
+- Saved pending editor changes before starting generation so workflows read current content. Runs stay on the original draft and site.
+- Added checks for content changes before applying automatic outputs. Results that already match saved values are skipped, and a run with no remaining changes completes without opening review.
+- Restricted request logs to administrators. File contents and temporary access links are excluded from logs, and access to workflow fields and asset metadata is checked before use.
+
+### Fixed
+
+- Prevented missing, null, or empty suggestions from clearing existing field values. Invalid suggestions get one repair attempt per run using validation feedback. Valid suggestions remain available even when another field fails.
+- Validated editor corrections before saving and kept invalid suggestions visible for review. Editors can correct invalid suggestions where the field supports editing.
+- Kept valid Categories, Tags, and Entries selections when the model also returns unavailable or ambiguous titles. Skipped titles are recorded in the request log.
+- Fixed date-only values shifting across time zones. Post Date and Expiration Date suggestions without an offset now use Craft's time zone, and edited dates include a time zone.
+- Fixed country-name lookup, currency rounding during conversion, and PHP errors when API key environment variables are missing. Tightened validation for numeric limits, text limits, options, and structured field values.
+- Recovered from temporary Craft security token failures during generation and review. Status checks resume, and unsaved review edits stay available to retry.
+
+### Upgrading from 1.0.x
+
+- Existing field configurations migrate to shared, administrator-managed workflows. Check the Craft queue and grant editors the Autofill permissions they need after upgrading.
+- Bulk runs require an active initiating user. Use `--user` for CLI runs and `--confirm-automatic=1` for batches that can apply outputs automatically. Existing field and entry arguments still work with migrated workflows.
+- PHP callers should update how they interpret bulk results. `queue()` returns a saved Autofill run ID in `jobId`, and `run()` can report success while suggestions still await review.
+
+[Upgrade guide](https://www.jtdevelop.com/development/plugins/autofill#upgrade-guide) · [Autofill documentation](https://www.jtdevelop.com/development/plugins/autofill)
 
 ## 1.0.7 - 2026-07-27
 - Fixed a bug that cut off plain text fields value
