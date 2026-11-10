@@ -7,6 +7,7 @@ namespace jtdev\craftautofill\controllers;
 use Craft;
 use craft\web\Controller;
 use jtdev\craftautofill\AutofillPlugin;
+use jtdev\craftautofill\helpers\ErrorMessage;
 use Throwable;
 use yii\web\Response;
 
@@ -64,7 +65,7 @@ class WorkflowRunController extends Controller
             if (!$run) throw new \RuntimeException('This Autofill run is unavailable.');
             return $this->asJson(['success' => true, 'run' => $service->editorPayload($run, $actor)]);
         } catch (Throwable $e) {
-            return $this->asJson(['success' => false, 'error' => $e->getMessage()]);
+            return $this->asJson(['success' => false, 'error' => ErrorMessage::forUser($e)]);
         }
     }
 
@@ -73,6 +74,7 @@ class WorkflowRunController extends Controller
         $this->requireCpRequest();
         $this->requirePostRequest();
         $this->requireAcceptsJson();
+        $this->requirePermission('accessPlugin-autofill');
         try {
             $body = Craft::$app->getRequest()->getBodyParams();
             $runtime = AutofillPlugin::getInstance()->getWorkflowRuntimeService();
@@ -86,13 +88,12 @@ class WorkflowRunController extends Controller
             $prompt = (string)($body['userPrompt'] ?? '');
             $result = match ($action) {
                 'preview' => ['prompt' => $runtime->preview($definition, $element, $prompt)],
-                'generate' => ['suggestions' => $runtime->generate($definition, $element, $prompt)],
                 'normalize' => ['suggestions' => $runtime->normalizePreview((string)($body['rawResponse'] ?? ''), $definition, $element)],
                 'apply' => ['applied' => $runtime->apply($definition, $element, is_array($body['suggestion'] ?? null) ? $body['suggestion'] : [])],
             };
             return $this->asJson(['success' => true, ...$result]);
         } catch (Throwable $e) {
-            return $this->asJson(['success' => false, 'error' => $e->getMessage()]);
+            return $this->asJson(['success' => false, 'error' => ErrorMessage::forUser($e)]);
         }
     }
 }

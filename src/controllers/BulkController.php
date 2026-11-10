@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace jtdev\craftautofill\controllers;
 
 use Craft;
-use craft\elements\Asset;
-use craft\elements\Entry;
 use craft\helpers\StringHelper;
 use craft\helpers\UrlHelper;
 use craft\helpers\Cp;
 use craft\web\Controller;
 use jtdev\craftautofill\AutofillPlugin;
+use jtdev\craftautofill\helpers\ErrorMessage;
+use jtdev\craftautofill\jobs\PrepareBulkRunsJob;
 use jtdev\craftautofill\models\Workflow;
 use RuntimeException;
 use Throwable;
@@ -97,29 +97,33 @@ class BulkController extends Controller
                 throw new RuntimeException('Confirm that this batch may apply fields automatically without review.');
             }
             $actor = Craft::$app->getUser()->getIdentity();
-            $batchUid = StringHelper::UUID();
-            $queued = 0;
-            $runIds = [];
-            $errors = [];
-            $siteId = (int)$request->getBodyParam('siteId', Craft::$app->getSites()->getCurrentSite()->id);
-            foreach ($ids as $id) {
-                try {
-                    $element = Craft::$app->getElements()->getElementById($id, $workflow->scope === 'asset' ? Asset::class : Entry::class, $siteId);
-                    if (!$element) throw new RuntimeException('Content is unavailable.');
-                    $run = $plugin->getWorkflowRunService()->start($workflow, $element, $actor, (string)$request->getBodyParam('userPrompt', ''), $batchUid);
-                    $runIds[] = (int)$run->id;
-                    $queued++;
-                } catch (Throwable $error) {
-                    $errors[] = $id . ': ' . $error->getMessage();
-                }
+            $access = $plugin->getWorkflowAccess();
+            if (!$access->canView($workflow, $actor) || !$access->can($actor, 'run')) {
+                throw new RuntimeException('You do not have permission to run this workflow.');
             }
-            if ($request->getAcceptsJson()) return $this->asJson(['success' => $queued > 0, 'queued' => $queued, 'runIds' => $runIds, 'errors' => $errors, 'batchUid' => $batchUid]);
-            Craft::$app->getSession()->setNotice(Craft::t('autofill', '{count} items queued or already awaiting review.', ['count' => $queued]));
-            if ($errors !== []) Craft::$app->getSession()->setError(implode(' ', $errors));
+            $siteId = (int)$request->getBodyParam('siteId', Craft::$app->getSites()->getCurrentSite()->id);
+            if (!in_array($siteId, Craft::$app->getSites()->getEditableSiteIds(), true)) {
+                throw new RuntimeException('You do not have permission to edit content on this site.');
+            }
+            // Runs are created by a queue job so large selections don't hit the request time limit.
+            // Each item is still checked for scope and permission when its run is created.
+            $batchUid = StringHelper::UUID();
+            Craft::$app->getQueue()->push(new PrepareBulkRunsJob([
+                'workflowId' => (int)$workflow->id,
+                'elementIds' => $ids,
+                'siteId' => $siteId,
+                'actorId' => (int)$actor->id,
+                'userPrompt' => (string)$request->getBodyParam('userPrompt', ''),
+                'batchUid' => $batchUid,
+            ]));
+            $queued = count($ids);
+            if ($request->getAcceptsJson()) return $this->asJson(['success' => true, 'queued' => $queued, 'runIds' => [], 'errors' => [], 'batchUid' => $batchUid]);
+            Craft::$app->getSession()->setNotice(Craft::t('autofill', 'Preparing {count, plural, =1{# item} other{# items}}. Results appear in the inbox as they’re ready.', ['count' => $queued]));
             return $this->redirect(UrlHelper::cpUrl('autofill/inbox', ['status' => 'queued']));
         } catch (Throwable $error) {
-            if ($request->getAcceptsJson()) return $this->asJson(['success' => false, 'error' => $error->getMessage()]);
-            Craft::$app->getSession()->setError($error->getMessage());
+            $message = ErrorMessage::forUser($error);
+            if ($request->getAcceptsJson()) return $this->asJson(['success' => false, 'error' => $message]);
+            Craft::$app->getSession()->setError($message);
             return $this->redirect(UrlHelper::cpUrl('autofill/bulk'));
         }
     }

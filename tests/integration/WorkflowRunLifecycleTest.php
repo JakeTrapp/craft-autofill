@@ -46,8 +46,11 @@ final class WorkflowRunLifecycleTest extends Unit
             $service->process((int)$run->id);
             $run = WorkflowRunRecord::findOne($run->id);
             self::assertSame('ready', $run->status, $run->errorMessage ?? '');
+            $count = $initialNotifications['count'] + 1;
             self::assertSame([
-                'count' => $initialNotifications['count'] + 1,
+                'count' => $count,
+                'capped' => false,
+                'label' => (string)$count,
                 'latestId' => (int)$run->id,
             ], $service->notificationState($actor));
             self::assertSame(1, $provider->calls);

@@ -24,8 +24,18 @@ use Throwable;
 /** One durable lifecycle for Lite single runs and Pro batches/inbox. */
 class WorkflowRunService extends Component
 {
-    public function start(Workflow $workflow, ElementInterface $element, User $actor, string $prompt = '', ?string $batchUid = null, ?int $privateOwnerId = null): WorkflowRunRecord
+    /** Badge counts stop at this number and display as "10+". */
+    public const NOTIFICATION_COUNT_CAP = 10;
+    /** Queued runs older than this are treated as lost (for example, the queue was cleared). */
+    public const STALE_QUEUED_SECONDS = 86400;
+
+    /**
+     * @param bool $deferQueue Leave the generation job unpushed so a caller holding a DB transaction can
+     * push it after commit with queue(). Otherwise a non-DB queue could run the job before the row exists.
+     */
+    public function start(Workflow $workflow, ElementInterface $element, User $actor, string $prompt = '', ?string $batchUid = null, ?int $privateOwnerId = null, bool $deferQueue = false): WorkflowRunRecord
     {
+        $this->failStaleRuns();
         $plugin = AutofillPlugin::getInstance();
         if (!$workflow->showUserPromptInput) $prompt = '';
         if ($workflow->visibility === 'private') {
@@ -61,23 +71,80 @@ class WorkflowRunService extends Component
                 'baselineJson' => Json::encode($this->baseline($definition, $element)),
             ], false);
             if (!$run->save()) throw new RuntimeException('The Autofill run could not be saved.');
-            try {
-                Craft::$app->getQueue()->push(new RunWorkflowJob(['runId' => (int)$run->id]));
-            } catch (Throwable $error) {
-                $run->status = 'failed';
-                $run->errorMessage = 'The run could not be queued: ' . $error->getMessage();
-                $this->saveRun($run);
-                throw $error;
-            }
+            $run->wasCreated = true;
+            if (!$deferQueue) $this->queue($run);
             return $run;
         } finally {
             Craft::$app->getMutex()->release($lock);
         }
     }
 
+    /**
+     * Records a bulk item that couldn't start (for example, missing permission) so it shows under Failed in the inbox
+     * instead of disappearing. Repeated attempts for the same batch item are recorded once.
+     */
+    public function recordFailedStart(Workflow $workflow, ElementInterface $element, User $actor, string $batchUid, string $message): void
+    {
+        $exists = WorkflowRunRecord::find()->where([
+            'batchUid' => $batchUid, 'elementId' => $element->id, 'siteId' => $element->siteId, 'status' => 'failed',
+        ])->exists();
+        if ($exists) return;
+        $privateOwnerId = $workflow->visibility === 'private' ? ($workflow->ownerId ?? (int)$actor->id) : null;
+        $run = new WorkflowRunRecord();
+        $run->setAttributes([
+            'workflowId' => $workflow->id, 'initiatorId' => $actor->id, 'visibility' => $workflow->visibility,
+            'privateOwnerId' => $privateOwnerId,
+            'elementId' => $element->id, 'elementType' => $element instanceof Asset ? 'asset' : 'entry',
+            'siteId' => $element->siteId, 'batchUid' => $batchUid, 'status' => 'failed',
+            'definitionJson' => Json::encode($workflow->getAttributes()), 'userPrompt' => '',
+            'errorMessage' => 'This item could not start: ' . $message,
+        ], false);
+        $this->saveRun($run);
+    }
+
+    /** Pushes the generation job for a run that start() just created. Existing runs are left alone. */
+    public function queue(WorkflowRunRecord $run): void
+    {
+        if (!$run->wasCreated || $run->status !== 'queued') return;
+        try {
+            Craft::$app->getQueue()->push(new RunWorkflowJob(['runId' => (int)$run->id]));
+            $run->wasCreated = false;
+        } catch (Throwable $error) {
+            $run->status = 'failed';
+            $run->errorMessage = 'The run could not be queued: ' . $error->getMessage();
+            $this->saveRun($run);
+            throw $error;
+        }
+    }
+
+    /**
+     * Fails runs whose worker died or timed out, so they stop blocking new runs and workflow edits.
+     * A running run that has not been touched for longer than the job time limit can no longer finish.
+     */
+    public function failStaleRuns(): int
+    {
+        if (!Craft::$app->getDb()->tableExists(WorkflowRunRecord::tableName())) return 0;
+        $now = new \DateTimeImmutable();
+        $runningCutoff = $now->modify('-' . (RunWorkflowJob::ttrSeconds() + 120) . ' seconds');
+        $queuedCutoff = $now->modify('-' . self::STALE_QUEUED_SECONDS . ' seconds');
+        $failed = 0;
+        foreach ([
+            ['running', $runningCutoff, 'Generation stopped before it finished. The request may have timed out or the queue worker was interrupted. Regenerate to try again.'],
+            ['queued', $queuedCutoff, 'This run waited in the queue for over 24 hours and was never started. Regenerate to try again.'],
+        ] as [$status, $cutoff, $message]) {
+            $failed += Craft::$app->getDb()->createCommand()->update(WorkflowRunRecord::tableName(), [
+                'status' => 'failed',
+                'errorMessage' => $message,
+                'dateUpdated' => \craft\helpers\Db::prepareDateForDb($now),
+            ], ['and', ['status' => $status], ['<', 'dateUpdated', \craft\helpers\Db::prepareDateForDb($cutoff)]], [], false)->execute();
+        }
+        return $failed;
+    }
+
     /** Lookup is based on the run, so archived/private definitions cannot strand public results. */
     public function current(int $workflowId, int $elementId, ?int $siteId, User $actor): ?WorkflowRunRecord
     {
+        $this->failStaleRuns();
         $query = WorkflowRunRecord::find()->where([
             'workflowId' => $workflowId, 'elementId' => $elementId, 'status' => ['queued', 'running', 'ready', 'failed'],
         ]);
@@ -113,17 +180,33 @@ class WorkflowRunService extends Component
         return null;
     }
 
+    /**
+     * Counts stop at NOTIFICATION_COUNT_CAP so a large batch doesn't make every CP page check every run.
+     * @return array{count:int,capped:bool,label:string,latestId:int}
+     */
     public function notificationState(User $actor): array
     {
-        if (!Craft::$app->getDb()->tableExists(WorkflowRunRecord::tableName())) return ['count' => 0, 'latestId' => 0];
+        $empty = ['count' => 0, 'capped' => false, 'label' => '', 'latestId' => 0];
+        if (!Craft::$app->getDb()->tableExists(WorkflowRunRecord::tableName())) return $empty;
+        $access = AutofillPlugin::getInstance()->getWorkflowAccess();
+        // Only reviewers can act on a run, so skip the scan entirely for everyone else.
+        if (!$access->can($actor, 'review')) return $empty;
         $count = 0;
         $latestId = 0;
-        $query = WorkflowRunRecord::find()->where(['status' => 'ready']);
-        if (!$actor->admin) $query->andWhere(['or', ['initiatorId' => $actor->id], ['privateOwnerId' => $actor->id], ['visibility' => 'public']]);
-        foreach ($query->each() as $run) {
-            if ($this->isActionable($run, $actor)) { $count++; $latestId = max($latestId, (int)$run->id); }
+        $query = WorkflowRunRecord::find()->where(['status' => 'ready'])->orderBy(['id' => SORT_DESC]);
+        if (!$actor->admin) {
+            $audience = ['or', ['initiatorId' => $actor->id], ['privateOwnerId' => $actor->id]];
+            if ($access->can($actor, 'reviewOthers')) $audience[] = ['visibility' => 'public'];
+            $query->andWhere($audience);
         }
-        return compact('count', 'latestId');
+        foreach ($query->each(25) as $run) {
+            if (!$this->isActionable($run, $actor)) continue;
+            $latestId = max($latestId, (int)$run->id);
+            if (++$count >= self::NOTIFICATION_COUNT_CAP) break;
+        }
+        $capped = $count >= self::NOTIFICATION_COUNT_CAP;
+        $label = $count === 0 ? '' : ($capped ? self::NOTIFICATION_COUNT_CAP . '+' : (string)$count);
+        return compact('count', 'capped', 'label', 'latestId');
     }
 
     public function isActionable(WorkflowRunRecord $run, User $actor): bool
@@ -158,12 +241,17 @@ class WorkflowRunService extends Component
             $workflow = clone $workflow;
             if ($run->visibility === 'private') $workflow->visibility = 'private';
             $privateOwnerId = $run->visibility === 'private' ? ($run->privateOwnerId ?? Json::decode($run->definitionJson)['ownerId'] ?? $run->initiatorId) : null;
-            $replacement = $this->start($workflow, $this->element($run), $actor, (string)$run->userPrompt, null, $privateOwnerId !== null ? (int)$privateOwnerId : null);
+            $replacement = $this->start($workflow, $this->element($run), $actor, (string)$run->userPrompt, null, $privateOwnerId !== null ? (int)$privateOwnerId : null, deferQueue: true);
             $transaction->commit();
-            return $replacement;
         } catch (Throwable $error) {
             $transaction->rollBack();
+            Craft::$app->getMutex()->release($lock);
             throw $error;
+        }
+        try {
+            // Push only after commit: a Redis/SQS worker could otherwise run before the new row is visible.
+            $this->queue($replacement);
+            return $replacement;
         } finally {
             Craft::$app->getMutex()->release($lock);
         }

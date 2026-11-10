@@ -72,6 +72,15 @@
     } %}
 {% endif %}
 
+{% set literalApiKeyRows = settings.getLiteralApiKeyRows() %}
+{% if literalApiKeyRows is not empty %}
+    <p class="warning has-icon">
+        <span class="icon" aria-hidden="true"></span>
+        <span class="visually-hidden">{{ 'Warning'|t('app') }}: </span>
+        <span>{{ 'These model configs store an API key directly: {rows}. Move each key to your .env file and reference it like $OPENAI_API_KEY. Settings can’t be saved until this is fixed.'|t('autofill', { rows: literalApiKeyRows|join(', ') }) }}</span>
+    </p>
+{% endif %}
+
 {{ forms.editableTableField({
     label: 'AI Model Configurations ' ~ aiModelHelpTip,
     id: 'modelConfigs',

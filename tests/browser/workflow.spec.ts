@@ -445,9 +445,12 @@ test('bulk asset generation persists results and supports review from the inbox'
   const runId = await page.evaluate(async ({ handle, assetId, siteId }) => {
     const craft = (window as any).Craft;
     const { data } = await craft.sendActionRequest('POST', 'autofill/bulk/queue', { data: { workflowHandle: handle, elementIds: [assetId], siteId } });
-    if (!data.success || data.runIds.length !== 1) throw new Error(JSON.stringify(data));
+    if (!data.success || data.queued !== 1) throw new Error(JSON.stringify(data));
+    // The bulk submission queues a preparation job, which then queues the generation job.
     await craft.sendActionRequest('POST', 'queue/run');
-    return data.runIds[0] as number;
+    const { data: current } = await craft.sendActionRequest('POST', 'autofill/workflow-run/current', { data: { workflowHandle: handle, elementId: assetId, siteId } });
+    if (!current.run?.id) throw new Error(JSON.stringify(current));
+    return current.run.id as number;
   }, { handle: config.workflowHandle, assetId: data.bulkAsset.id, siteId: data.siteId });
   await expectRunReady(page, runId);
   await page.goto('/admin/autofill');

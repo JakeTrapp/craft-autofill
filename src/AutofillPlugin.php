@@ -47,7 +47,7 @@ class AutofillPlugin extends Plugin
     public const EDITION_LITE = 'lite';
     public const EDITION_PRO = 'pro';
 
-    public string $schemaVersion = '2.1.2';
+    public string $schemaVersion = '2.1.3';
     public bool $hasCpSettings = true;
     public bool $hasCpSection = true;
 
@@ -343,6 +343,11 @@ class AutofillPlugin extends Plugin
                 $event->rules['autofill/logs'] = 'autofill/logs/index';
             }
         );
+
+        // Craft's garbage collection also fails runs whose queue worker died, so they don't block new runs.
+        Event::on(\craft\services\Gc::class, \craft\services\Gc::EVENT_RUN, static function(): void {
+            self::getInstance()->getWorkflowRunService()->failStaleRuns();
+        });
 
         Event::on(
             Fields::class,

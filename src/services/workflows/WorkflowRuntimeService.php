@@ -465,6 +465,7 @@ class WorkflowRuntimeService extends Component
                 throw new RuntimeException('This workflow preserves the existing field value.');
             }
             $element->setAttributes([$handle => $value], false);
+            $changedAttribute = $handle;
         } else {
             $field = AutofillPlugin::getInstance()->getEntryTypeFieldResolverService()->resolveForAutofillField($definition, $uid);
             if ($field === null) {
@@ -492,10 +493,32 @@ class WorkflowRuntimeService extends Component
                 throw new RuntimeException('The configured field type is unsupported.');
             }
             $value = $adapter->applySuggestionToEntry($field, $element, $value);
+            $changedAttribute = 'field:' . $handle;
         }
-        if (!Craft::$app->getElements()->saveElement($element, false, false, false)) {
+        $this->saveChangedAttribute($element, $changedAttribute);
+        return ['elementId' => (int)$element->id, 'targetFieldUid' => $uid, 'savedValue' => $value];
+    }
+
+    /**
+     * Validates only the attribute Autofill changed, then saves. Unrelated problems an editor hasn't fixed yet
+     * (like another empty required field on a draft) don't block applying, but invalid generated values do.
+     */
+    private function saveChangedAttribute(ElementInterface $element, string $attribute): void
+    {
+        $previousScenario = $element->getScenario();
+        // Required-field rules only apply to live content, matching how Craft saves drafts and disabled content.
+        $isLive = !$element->getIsDraft() && $element->enabled && $element->getEnabledForSite();
+        $element->setScenario($isLive ? \craft\base\Element::SCENARIO_LIVE : \craft\base\Element::SCENARIO_DEFAULT);
+        try {
+            if (!$element->validate([$attribute])) {
+                throw new RuntimeException(implode(' ', $element->getErrorSummary(true)) ?: 'The suggestion is not a valid value for this field.');
+            }
+        } finally {
+            $element->setScenario($previousScenario);
+        }
+        // Validation already ran for the changed attribute. Update the search index so applied text is searchable.
+        if (!Craft::$app->getElements()->saveElement($element, false, false, true)) {
             throw new RuntimeException(implode(' ', $element->getErrorSummary(true)) ?: 'The suggestion could not be saved.');
         }
-        return ['elementId' => (int)$element->id, 'targetFieldUid' => $uid, 'savedValue' => $value];
     }
 }

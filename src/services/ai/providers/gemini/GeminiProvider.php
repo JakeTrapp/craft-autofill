@@ -13,8 +13,6 @@ use RuntimeException;
 
 class GeminiProvider extends AbstractHttpProvider implements AiProviderInterface
 {
-    protected const DEFAULT_REQUEST_TIMEOUT = 120;
-
     public function getProviderKey(): string { return 'gemini'; }
 
     protected function getEndpoint(AiModelConfig $config): string
@@ -60,6 +58,7 @@ class GeminiProvider extends AbstractHttpProvider implements AiProviderInterface
             'contents' => $contents,
             'generationConfig' => ['responseMimeType' => 'application/json'],
         ];
+        if ($config->maxOutputTokens !== null) $payload['generationConfig']['maxOutputTokens'] = $config->maxOutputTokens;
         if ($system !== []) $payload['systemInstruction'] = ['parts' => $system];
         return $payload;
     }
@@ -69,6 +68,7 @@ class GeminiProvider extends AbstractHttpProvider implements AiProviderInterface
         if (!$providerConfig instanceof AiModelConfig || $providerConfig->provider !== 'gemini') throw new RuntimeException('Gemini provider requires a Gemini model configuration.');
         if (!$request->validate() || !$providerConfig->validate()) throw new RuntimeException('Gemini request or configuration is invalid.');
         $raw = $this->postJson($request, $providerConfig);
+        $this->assertNotTruncated(($raw['candidates'][0]['finishReason'] ?? '') === 'MAX_TOKENS', $providerConfig);
         $text = '';
         foreach (($raw['candidates'][0]['content']['parts'] ?? []) as $part) if (is_array($part) && is_string($part['text'] ?? null)) $text .= $part['text'];
         $usage = is_array($raw['usageMetadata'] ?? null) ? [

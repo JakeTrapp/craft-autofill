@@ -7,6 +7,7 @@ namespace jtdev\craftautofill\controllers;
 use Craft;
 use craft\web\Controller;
 use jtdev\craftautofill\AutofillPlugin;
+use jtdev\craftautofill\helpers\ErrorMessage;
 use Throwable;
 use yii\web\Response;
 
@@ -52,9 +53,7 @@ class FieldSettingsController extends Controller
 
             return $this->asJson([
                 'success' => false,
-                'error' => Craft::$app->getConfig()->getGeneral()->devMode
-                    ? $exception->getMessage()
-                    : 'Could not load fields for the selected entry type.',
+                'error' => ErrorMessage::forUser($exception, 'Could not load fields for the selected entry type.'),
                 'fields' => [],
             ]);
         }

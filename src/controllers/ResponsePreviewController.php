@@ -7,6 +7,7 @@ namespace jtdev\craftautofill\controllers;
 use Craft;
 use craft\web\Controller;
 use jtdev\craftautofill\AutofillPlugin;
+use jtdev\craftautofill\helpers\ErrorMessage;
 use Throwable;
 use yii\web\Response;
 
@@ -17,6 +18,7 @@ class ResponsePreviewController extends Controller
         $this->requireCpRequest();
         $this->requirePostRequest();
         $this->requireAcceptsJson();
+        $this->requirePermission('accessPlugin-autofill');
 
         try {
             $body = Craft::$app->getRequest()->getBodyParams();
@@ -52,9 +54,7 @@ class ResponsePreviewController extends Controller
             return $this->asJson([
                 'success' => false,
                 'suggestions' => [],
-                'error' => Craft::$app->getConfig()->getGeneral()->devMode
-                    ? $exception->getMessage()
-                    : 'Could not normalize response.',
+                'error' => ErrorMessage::forUser($exception, 'Could not normalize response.'),
             ]);
         }
     }
@@ -64,6 +64,7 @@ class ResponsePreviewController extends Controller
         $this->requireCpRequest();
         $this->requirePostRequest();
         $this->requireAcceptsJson();
+        $this->requirePermission('accessPlugin-autofill');
 
         try {
             $body = Craft::$app->getRequest()->getBodyParams();
@@ -96,9 +97,7 @@ class ResponsePreviewController extends Controller
 
             return $this->asJson([
                 'success' => false,
-                'error' => Craft::$app->getConfig()->getGeneral()->devMode
-                    ? $exception->getMessage()
-                    : 'Could not apply suggestion.',
+                'error' => ErrorMessage::forUser($exception, 'Could not apply suggestion.'),
             ]);
         }
     }

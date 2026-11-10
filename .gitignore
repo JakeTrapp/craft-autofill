@@ -31,3 +31,6 @@ outline.txt
 !/testbench/bin/test-live
 !/testbench/bin/mark-test-database
 !/testbench/bin/switch-craft
+
+# Local demo/testing site
+/mountain-bike-demo/

@@ -50,6 +50,9 @@ class OpenAiProvider extends AbstractHttpProvider implements AiProviderInterface
         if ($config->reasoningEffort !== null && $config->reasoningEffort !== '') {
             $payload['reasoning'] = ['effort' => $config->reasoningEffort];
         }
+        if ($config->maxOutputTokens !== null) {
+            $payload['max_output_tokens'] = $config->maxOutputTokens;
+        }
         return $payload;
     }
 
@@ -58,6 +61,7 @@ class OpenAiProvider extends AbstractHttpProvider implements AiProviderInterface
         if (!$providerConfig instanceof AiModelConfig || $providerConfig->provider !== 'openai') throw new RuntimeException('OpenAI provider requires an OpenAI model configuration.');
         if (!$request->validate() || !$providerConfig->validate()) throw new RuntimeException('OpenAI request or configuration is invalid.');
         $raw = $this->postJson($request, $providerConfig);
+        $this->assertNotTruncated(($raw['status'] ?? '') === 'incomplete' && ($raw['incomplete_details']['reason'] ?? '') === 'max_output_tokens', $providerConfig);
         $text = is_string($raw['output_text'] ?? null) ? $raw['output_text'] : $this->extractOutputText($raw);
         $usage = is_array($raw['usage'] ?? null) ? $raw['usage'] : [];
         return $this->envelope($raw, $text, $usage, is_string($raw['id'] ?? null) ? $raw['id'] : null, 'openai');

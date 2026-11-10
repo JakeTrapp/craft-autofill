@@ -6,6 +6,7 @@
 {% set options = {
     screen: 'editor', workflow: workflow, entryTypes: entryTypes, volumes: volumes, modelConfigs: modelConfigs,
     isAdmin: isAdmin,
+    canRestore: craft.app.plugins.getPlugin('autofill').isProEdition(),
     listUrl: url('autofill/workflows'),
     editUrl: workflow.handle ? url('autofill/workflows/edit/' ~ workflow.handle) : url('autofill/workflows/new'),
     fieldsUrl: actionUrl('autofill/workflows/fields'),

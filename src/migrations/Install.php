@@ -7,6 +7,7 @@ namespace jtdev\craftautofill\migrations;
 use craft\db\Migration;
 use jtdev\craftautofill\records\AiRequestLogRecord;
 use jtdev\craftautofill\records\WorkflowRecord;
+use jtdev\craftautofill\records\WorkflowRunRecord;
 
 class Install extends Migration
 {
@@ -82,11 +83,16 @@ class Install extends Migration
 
         (new m261031_000000_workflow_runs())->safeUp();
         (new m261101_000000_private_run_ownership())->safeUp();
+        (new m261109_000000_run_maintenance())->safeUp();
         return true;
     }
 
+    /** Uninstalling removes all Autofill data. Runs go first because they reference workflows. */
     public function safeDown(): bool
     {
+        $this->dropTableIfExists(WorkflowRunRecord::tableName());
+        $this->dropTableIfExists(WorkflowRecord::tableName());
+        $this->dropTableIfExists(AiRequestLogRecord::tableName());
         return true;
     }
 }

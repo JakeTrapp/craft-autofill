@@ -7,6 +7,7 @@ namespace jtdev\craftautofill\controllers;
 use Craft;
 use craft\web\Controller;
 use jtdev\craftautofill\AutofillPlugin;
+use jtdev\craftautofill\helpers\ErrorMessage;
 use jtdev\craftautofill\fields\AutofillField;
 use RuntimeException;
 use Throwable;
@@ -19,6 +20,7 @@ class PromptPreviewController extends Controller
         $this->requireCpRequest();
         $this->requirePostRequest();
         $this->requireAcceptsJson();
+        $this->requirePermission('accessPlugin-autofill');
 
         try {
             $body = Craft::$app->getRequest()->getBodyParams();
@@ -52,9 +54,7 @@ class PromptPreviewController extends Controller
 
             return $this->asJson([
                 'success' => false,
-                'error' => Craft::$app->getConfig()->getGeneral()->devMode
-                    ? $exception->getMessage()
-                    : 'Could not build prompt preview.',
+                'error' => ErrorMessage::forUser($exception, 'Could not build prompt preview.'),
             ]);
         }
     }
@@ -76,7 +76,7 @@ class PromptPreviewController extends Controller
             $run = $plugin->getWorkflowRunService()->start($workflow, $element, Craft::$app->getUser()->getIdentity(), (string)($body['userPrompt'] ?? ''));
             return $this->asJson(['success' => true, 'run' => $plugin->getWorkflowRunService()->payload($run, Craft::$app->getUser()->getIdentity())]);
         } catch (Throwable $error) {
-            return $this->asJson(['success' => false, 'error' => $error->getMessage()]);
+            return $this->asJson(['success' => false, 'error' => ErrorMessage::forUser($error)]);
         }
     }
 

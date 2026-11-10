@@ -14,6 +14,18 @@ class Settings extends Model
     public bool $testMode = false;
 
     /**
+     * Seconds to wait for one AI provider response. Set in config/autofill.php; there's no control panel setting.
+     * Reasoning models may need 60–120 seconds.
+     */
+    public int $requestTimeout = AiModelConfig::DEFAULT_TIMEOUT;
+
+    /**
+     * Output token limit sent to every provider. Null uses each provider's default (Anthropic: 8192).
+     * Set in config/autofill.php; there's no control panel setting.
+     */
+    public ?int $maxOutputTokens = null;
+
+    /**
      * @var array<int, array<string, mixed>>
      */
     public array $modelConfigs = [];
@@ -28,6 +40,8 @@ class Settings extends Model
     {
         return [
             ['testMode', 'boolean'],
+            ['requestTimeout', 'integer', 'min' => AiModelConfig::MIN_TIMEOUT, 'max' => AiModelConfig::MAX_TIMEOUT],
+            ['maxOutputTokens', 'integer', 'min' => AiModelConfig::MIN_OUTPUT_TOKENS, 'max' => AiModelConfig::MAX_OUTPUT_TOKENS],
             ['modelConfigs', 'validateModelConfigs'],
         ];
     }
@@ -48,6 +62,25 @@ class Settings extends Model
         return null;
     }
 
+    /** The provider response wait, clamped to the supported range. Used to size queue time limits. */
+    public function getMaxRequestTimeout(): int
+    {
+        return max(AiModelConfig::MIN_TIMEOUT, min($this->requestTimeout, AiModelConfig::MAX_TIMEOUT));
+    }
+
+    /** @return string[] Labels of rows that still store a literal API key. */
+    public function getLiteralApiKeyRows(): array
+    {
+        $rows = [];
+        foreach ($this->modelConfigs as $index => $config) {
+            $value = trim((string)($config['apiKeyEnv'] ?? ''));
+            if ($value !== '' && !AiModelConfig::isEnvReference($value)) {
+                $rows[] = ($config['label'] ?? '') !== '' ? (string)$config['label'] : sprintf('Row %d', $index + 1);
+            }
+        }
+        return $rows;
+    }
+
     public function validateModelConfigs(): void
     {
         $this->modelConfigs = $this->normalizeModelConfigs($this->modelConfigs);
@@ -59,6 +92,11 @@ class Settings extends Model
             if (!in_array($provider, ['openai', 'anthropic', 'deepseek', 'gemini'], true)) {
                 $this->addError('modelConfigs', sprintf('%s has unsupported provider "%s".', $rowLabel, $provider));
                 continue;
+            }
+
+            $apiKeyEnv = trim((string)($config['apiKeyEnv'] ?? ''));
+            if ($apiKeyEnv !== '' && !AiModelConfig::isEnvReference($apiKeyEnv)) {
+                $this->addError('modelConfigs', sprintf('%s must reference an environment variable for its API key, like $OPENAI_API_KEY. Add the key to your .env file instead of entering it here.', $rowLabel));
             }
 
             $modelConfig = new AiModelConfig($config);

@@ -27,7 +27,8 @@ final class SuggestionPersistenceTest extends Unit
             );
             self::fail('An output from another layout was accepted.');
         } catch (\RuntimeException $exception) {
-            self::assertStringContainsString('not part of this content layout', $exception->getMessage());
+            // The legacy path now shares the workflow apply checks, so it rejects the other entry type before the layout check.
+            self::assertMatchesRegularExpression('/does not support this entry type|not part of this content layout/', $exception->getMessage());
         }
         self::assertNull(TestProject::reloadEntry($other['entry'])->getFieldValue('otherOutput'));
     }

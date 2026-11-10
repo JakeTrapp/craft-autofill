@@ -69,7 +69,8 @@ class WorkflowService extends Component
             return false;
         }
 
-        if (!$allowLiteOverLimit && !$this->isProEdition() && $workflow->id === null && WorkflowRecord::find()->exists()) {
+        // Archived workflows don't count toward the Lite limit. They can't be restored in Lite (see setArchived()).
+        if (!$allowLiteOverLimit && !$this->isProEdition() && $workflow->id === null && WorkflowRecord::find()->where(['archived' => false])->exists()) {
             $workflow->addError('name', 'Autofill Lite supports one workflow. Upgrade to Autofill Pro to create more.');
             return false;
         }
@@ -122,6 +123,8 @@ class WorkflowService extends Component
 
     public function assertNotProcessing(Workflow $workflow): void
     {
+        // A dead worker must not lock the workflow until someone notices and cancels the run.
+        AutofillPlugin::getInstance()->getWorkflowRunService()->failStaleRuns();
         if ($workflow->id !== null && Craft::$app->getDb()->tableExists(WorkflowRunRecord::tableName()) &&
             WorkflowRunRecord::find()->where(['workflowId' => $workflow->id, 'status' => ['queued', 'running']])->exists()) {
             throw new RuntimeException('This workflow is processing. Wait for its runs to finish before changing it.');
@@ -134,6 +137,10 @@ class WorkflowService extends Component
         if (!$record instanceof WorkflowRecord) return false;
 
         $this->assertNotProcessing($this->modelFromRecord($record));
+        if (!$archived && $record->archived && !$this->isProEdition()) {
+            // Lite archives a workflow once it has run history, so restoring it would bypass the one-workflow limit.
+            throw new RuntimeException('Autofill Lite can’t restore archived workflows. Upgrade to Autofill Pro to restore it.');
+        }
         $record->archived = $archived;
         return $record->save(false);
     }

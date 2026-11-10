@@ -47,4 +47,15 @@ composer require jt-dev/craft-autofill
 ./craft plugin/install autofill
 ```
 
+### Request limits
+
+AI requests time out after 30 seconds by default. To change this, or to raise the output token limit, copy [`src/config.php`](src/config.php) to `config/autofill.php` in your project:
+
+```php
+return [
+    'requestTimeout' => 90,     // seconds, 5–600
+    'maxOutputTokens' => 16000, // null uses the provider default
+];
+```
+
 [Read the documentation](https://www.jtdevelop.com/development/plugins/autofill) for setup and examples. Updating an existing installation? See the [upgrade notes](UPGRADING.md).

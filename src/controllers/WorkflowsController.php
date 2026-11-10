@@ -11,6 +11,7 @@ use craft\models\EntryType;
 use craft\models\Volume;
 use craft\web\Controller;
 use jtdev\craftautofill\AutofillPlugin;
+use jtdev\craftautofill\helpers\ErrorMessage;
 use jtdev\craftautofill\models\Workflow;
 use Throwable;
 use yii\web\Response;
@@ -181,7 +182,7 @@ class WorkflowsController extends Controller
             $saved = AutofillPlugin::getInstance()->getWorkflowService()->saveWorkflow($workflow);
         } catch (Throwable $exception) {
             Craft::error($exception->getMessage(), __METHOD__);
-            return $this->asJson(['success' => false, 'error' => $exception instanceof \RuntimeException ? $exception->getMessage() : 'Could not save this workflow.']);
+            return $this->asJson(['success' => false, 'error' => ErrorMessage::forUser($exception, 'Could not save this workflow.')]);
         }
 
         if (!$saved) {
@@ -217,7 +218,7 @@ class WorkflowsController extends Controller
                 return $this->asJson(['success' => false, 'error' => 'Could not change the workflow archive status.']);
             }
         } catch (\RuntimeException $exception) {
-            return $this->asJson(['success' => false, 'error' => $exception->getMessage()]);
+            return $this->asJson(['success' => false, 'error' => ErrorMessage::forUser($exception)]);
         }
 
         return $this->asJson(['success' => true, 'archived' => $archived]);

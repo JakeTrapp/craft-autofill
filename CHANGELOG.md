@@ -1,12 +1,24 @@
 # Release Notes for Autofill
 
-## Unreleased
+## 2.1.0 - 2026-11-09
+
+### Added
+
+- Added the `requestTimeout` and `maxOutputTokens` config settings, which can be set in `config/autofill.php`. Requests time out after 30 seconds by default.
 
 ### Changed
 
 - The review dialog shows how many suggestions were applied and how many already matched saved values. Queued runs show that they are waiting for the Craft queue.
 - Model prompts identify output fields by their unique IDs so fields with the same label can be distinguished.
-- Gemini requests use a 120-second timeout by default, and provider timeouts report which provider timed out.
+- Provider timeouts now come from the `requestTimeout` setting instead of Craft’s Guzzle settings, and timeout errors explain how to raise the limit.
+- Anthropic requests allow up to 8,192 output tokens by default, up from 4,096.
+- Bulk Autofill prepares runs in a queue job, so large selections no longer depend on the request time limit. Items that can’t start appear under Failed in the Inbox.
+- Notification badges show “10+” instead of counting every ready run, which keeps control panel pages fast after large batches.
+- Applying a suggestion validates the changed field and updates the search index.
+- API keys must be stored as environment variable references, such as `$OPENAI_API_KEY`. Existing literal keys keep working, but plugin settings can’t be saved until they are moved to `.env`.
+- Archived workflows no longer count toward the Autofill Lite workflow limit. Autofill Lite can’t restore archived workflows.
+- Unexpected server errors are logged and replaced with a general message instead of showing internal details.
+- Uninstalling Autofill removes its workflows, runs and request logs.
 
 ### Fixed
 
@@ -16,6 +28,12 @@
 - Fixed “Only fill empty fields” handling for existing values, including zero and false, when current values are excluded from the prompt.
 - Fixed asset metadata replacing the output field’s current value in prompts for asset workflows.
 - Fixed SEOmatic prompts, settings, and review showing disabled sections, and preserved existing SEO metadata outside the suggested patch.
+- Fixed runs staying “Running” forever after a queue worker timed out or stopped, which blocked new runs and workflow edits. Runs that stop responding are now marked as failed. Runs queued for more than 24 hours without starting are also marked as failed.
+- Fixed regenerated runs sometimes staying queued when Craft uses a non-database queue driver.
+- Fixed responses that hit the output token limit failing with a parse error instead of saying they were cut off.
+- Fixed Autofill Lite blocking new workflows after the only workflow was archived.
+- Fixed the legacy field-based apply endpoint skipping the review permission and “Only fill empty fields” setting.
+- Fixed runs for permanently deleted content remaining in the Inbox.
 
 ## 2.0.0 - 2026-11-07
 

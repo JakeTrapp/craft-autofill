@@ -82,6 +82,10 @@ class AiService extends Component
     {
         $provider = strtolower(trim((string)($attributes['provider'] ?? 'openai')));
         $attributes['provider'] = $provider;
+        // Request limits are global settings from config/autofill.php, not per-row control panel settings.
+        $settings = \jtdev\craftautofill\AutofillPlugin::getInstance()->getSettings();
+        $attributes['timeout'] = $settings->getMaxRequestTimeout();
+        $attributes['maxOutputTokens'] = $settings->maxOutputTokens;
 
         return new AiModelConfig($attributes);
     }

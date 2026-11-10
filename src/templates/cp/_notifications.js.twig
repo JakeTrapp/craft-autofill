@@ -22,8 +22,11 @@
                 badge.innerHTML = '<span class="badge" aria-hidden="true"></span><span class="visually-hidden" data-notification></span>';
                 link.appendChild(badge);
             }
-            badge.querySelector('.badge').textContent = String(state.count);
-            badge.querySelector('[data-notification]').textContent = `${state.count} Autofill items ready to review`;
+            const label = state.label || String(state.count);
+            badge.querySelector('.badge').textContent = label;
+            badge.querySelector('[data-notification]').textContent = `${label} Autofill items ready to review`;
+            const subnavBadge = document.querySelector('#nav-autofill a[href*="autofill/inbox"] .badge');
+            if (subnavBadge) subnavBadge.textContent = label;
             {% endif %}
         } catch (_) { /* Preserve existing UI during transient network failures. */ }
     };

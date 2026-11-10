@@ -15,7 +15,7 @@ use RuntimeException;
 
 abstract class AbstractHttpProvider
 {
-    protected const DEFAULT_REQUEST_TIMEOUT = 0;
+    protected const CONNECT_TIMEOUT = 10;
 
     abstract protected function getEndpoint(AiModelConfig $config): string;
 
@@ -40,13 +40,19 @@ abstract class AbstractHttpProvider
                 'headers' => $this->getHeaders($config) + ['Content-Type' => 'application/json'],
                 'json' => $this->buildPayload($request, $config),
                 'http_errors' => false,
-                'timeout' => $client->getConfig('timeout') ?? static::DEFAULT_REQUEST_TIMEOUT,
+                // The response limit comes from the `requestTimeout` setting, not Craft's Guzzle config.
+                'timeout' => max(AiModelConfig::MIN_TIMEOUT, $config->timeout),
+                'connect_timeout' => min(static::CONNECT_TIMEOUT, max(AiModelConfig::MIN_TIMEOUT, $config->timeout)),
             ]);
         } catch (GuzzleException $exception) {
             if (defined('CURLE_OPERATION_TIMEOUTED') &&
                 ($exception instanceof ConnectException || $exception instanceof RequestException) &&
                 ($exception->getHandlerContext()['errno'] ?? null) === CURLE_OPERATION_TIMEOUTED) {
-                throw new RuntimeException(sprintf('The %s API request timed out.', $config->provider), previous: $exception);
+                throw new RuntimeException(sprintf(
+                    'The %s request timed out after %d seconds. Raise `requestTimeout` in config/autofill.php, or use a faster model.',
+                    $config->provider,
+                    $config->timeout,
+                ), previous: $exception);
             }
             throw new RuntimeException('AI provider request failed. Check connectivity and provider configuration.', previous: $exception);
         }
@@ -64,6 +70,17 @@ abstract class AbstractHttpProvider
         }
 
         return $decoded;
+    }
+
+    /** Truncated JSON cannot be parsed, so report the real cause instead of a parse error. */
+    protected function assertNotTruncated(bool $truncated, AiModelConfig $config): void
+    {
+        if ($truncated) {
+            throw new RuntimeException(sprintf(
+                'The %s response was cut off because it reached the output token limit. Raise `maxOutputTokens` in config/autofill.php, or reduce the number of output fields.',
+                $config->provider,
+            ));
+        }
     }
 
     /** @return array{output_text:string,usage:array<string,int>,id:?string,provider:string,providerRaw:array<string,mixed>} */

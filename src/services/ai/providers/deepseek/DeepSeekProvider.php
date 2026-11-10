@@ -46,6 +46,9 @@ class DeepSeekProvider extends AbstractHttpProvider implements AiProviderInterfa
         if ($config->reasoningEffort !== null && $config->reasoningEffort !== '') {
             $payload['reasoning_effort'] = $config->reasoningEffort;
         }
+        if ($config->maxOutputTokens !== null) {
+            $payload['max_tokens'] = $config->maxOutputTokens;
+        }
         return $payload;
     }
 
@@ -54,6 +57,7 @@ class DeepSeekProvider extends AbstractHttpProvider implements AiProviderInterfa
         if (!$providerConfig instanceof AiModelConfig || $providerConfig->provider !== 'deepseek') throw new RuntimeException('DeepSeek provider requires a DeepSeek model configuration.');
         if (!$request->validate() || !$providerConfig->validate()) throw new RuntimeException('DeepSeek request or configuration is invalid.');
         $raw = $this->postJson($request, $providerConfig);
+        $this->assertNotTruncated(($raw['choices'][0]['finish_reason'] ?? '') === 'length', $providerConfig);
         $choice = $raw['choices'][0]['message']['content'] ?? '';
         $text = is_string($choice) ? $choice : $this->contentText($choice);
         $usage = is_array($raw['usage'] ?? null) ? [

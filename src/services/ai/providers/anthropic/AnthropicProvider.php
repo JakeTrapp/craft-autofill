@@ -13,6 +13,9 @@ use RuntimeException;
 
 class AnthropicProvider extends AbstractHttpProvider implements AiProviderInterface
 {
+    /** Anthropic requires an explicit output limit. */
+    public const DEFAULT_MAX_TOKENS = 8192;
+
     public function getProviderKey(): string { return 'anthropic'; }
     protected function getEndpoint(AiModelConfig $config): string { return 'https://api.anthropic.com/v1/messages'; }
 
@@ -56,7 +59,7 @@ class AnthropicProvider extends AbstractHttpProvider implements AiProviderInterf
             $this->appendPart($messages, $part);
         }
 
-        $payload = ['model' => $config->modelId, 'max_tokens' => 4096, 'messages' => $messages];
+        $payload = ['model' => $config->modelId, 'max_tokens' => $config->maxOutputTokens ?? self::DEFAULT_MAX_TOKENS, 'messages' => $messages];
         if ($system !== []) $payload['system'] = implode("\n\n", $system);
         return $payload;
     }
@@ -66,6 +69,7 @@ class AnthropicProvider extends AbstractHttpProvider implements AiProviderInterf
         if (!$providerConfig instanceof AiModelConfig || $providerConfig->provider !== 'anthropic') throw new RuntimeException('Anthropic provider requires an Anthropic model configuration.');
         if (!$request->validate() || !$providerConfig->validate()) throw new RuntimeException('Anthropic request or configuration is invalid.');
         $raw = $this->postJson($request, $providerConfig);
+        $this->assertNotTruncated(($raw['stop_reason'] ?? '') === 'max_tokens', $providerConfig);
         $text = '';
         foreach (($raw['content'] ?? []) as $part) if (is_array($part) && is_string($part['text'] ?? null)) $text .= $part['text'];
         $usage = is_array($raw['usage'] ?? null) ? [

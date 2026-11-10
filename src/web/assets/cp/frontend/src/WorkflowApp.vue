@@ -265,7 +265,7 @@ function updateValue(target: any, key: string, event: Event, numeric = false) {
   <main ref="page" class="af-page af-editor">
       <Teleport to="#autofill-workflow-actions">
         <button type="button" class="btn submit" :disabled="busy || readOnly" @click="save">{{ busy ? 'Saving…' : 'Save workflow' }}</button>
-        <DropdownMenu v-if="opts.isAdmin && workflow.id" placement="bottom-end" @pk-select="toggleArchived">
+        <DropdownMenu v-if="opts.isAdmin && workflow.id && (!workflow.archived || opts.canRestore !== false)" placement="bottom-end" @pk-select="toggleArchived">
           <template #trigger><button type="button" class="btn action-btn" aria-label="Workflow actions" :disabled="busy || readOnly"></button></template>
           <DropdownItem value="toggle-archive">{{ workflow.archived ? 'Restore workflow' : 'Archive workflow' }}</DropdownItem>
         </DropdownMenu>
@@ -274,7 +274,7 @@ function updateValue(target: any, key: string, event: Event, numeric = false) {
       <div v-if="Object.keys(errors).length" class="af-banner af-banner--error" role="alert"><ul style="margin:0;padding-left:18px"><li v-for="(messages, attribute) in errors" :key="attribute">{{ messages.join(' ') }}</li></ul></div>
 
       <p v-if="readOnly" class="notice">{{ workflow.processing ? 'This workflow is processing. Editing is available when generation finishes.' : 'You can view this workflow, but cannot edit it.' }}</p>
-      <p v-if="workflow.archived" class="notice">This workflow is archived.</p>
+      <p v-if="workflow.archived" class="notice">This workflow is archived.<template v-if="opts.canRestore === false"> Autofill Lite can’t restore archived workflows.</template></p>
       <fieldset :disabled="readOnly" style="border:0;padding:0;margin:0;min-width:0">
       <section id="workflow-basics">
         <div class="af-basics-heading"><div class="af-label-line"><h2>Workflow setup</h2><HelpTip label="About workflow setup" text="Choose the content this workflow belongs to. Add the source information and fields to fill below." /></div><div class="af-label-line"><Lightswitch class="af-share-switch" size="sm" label="Share" :checked="workflow.visibility === 'public'" :disabled="readOnly" @update:checked="workflow.visibility = $event ? 'public' : 'private'" /><HelpTip label="About sharing" text="When shared, users with the appropriate Craft permissions can find and run this workflow. Otherwise, it’s private to its creator and administrators." /></div></div>
