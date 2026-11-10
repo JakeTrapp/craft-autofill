@@ -77,7 +77,10 @@
 
     const finishSuggestions = (reviewSuggestions, suggestions, request, config, reviewModal, autoAppliedCount) => {
         if (reviewSuggestions.length) {
-            reviewModal.setSuggestions(reviewSuggestions);
+            reviewModal.setSuggestions(reviewSuggestions, {
+                applied: autoAppliedCount,
+                unchanged: suggestions.filter(item => item.state === 'unchanged').length,
+            });
             return;
         }
         reviewModal.clear();
@@ -283,14 +286,18 @@
             }
         };
         const showRunReview = (run) => {
-            const pending = (run.suggestions || []).filter(item => item.state === 'pending' && item.canApply !== false);
+            const suggestions = run.suggestions || [];
+            const pending = suggestions.filter(item => item.state === 'pending' && item.canApply !== false);
             if (!run.canReview) { statusMessage(root, 'You do not have permission to review these results.'); return; }
             if (!pending.length) { statusMessage(root, 'No pending fields are available to you.'); return; }
             if (run.stale?.context || run.stale?.outputs?.length) {
                 window.Craft?.cp?.displayNotice('Content changed since generation. Review carefully before applying these results.');
             }
             consumeReviewLink(run);
-            reviewModal.setSuggestions(pending);
+            reviewModal.setSuggestions(pending, {
+                applied: suggestions.filter(item => item.state === 'applied').length,
+                unchanged: suggestions.filter(item => item.state === 'unchanged').length,
+            });
         };
         const updateRun = (run, notify = false) => {
             clearTimeout(pollTimer);
@@ -307,7 +314,7 @@
                 generateButton.classList.toggle('submit', run?.status === 'ready');
                 generateButton.setAttribute('aria-label', `${generateButton.textContent} ${config.workflowName}`);
             }
-            if (waiting) statusMessage(root, 'Generating results…');
+            if (waiting) statusMessage(root, run.status === 'queued' ? 'Waiting for the Craft queue…' : 'Generating results…');
             if (!run) return;
             const applied = (run.suggestions || []).filter(item => item.state === 'applied').length;
             const automaticApplied = (run.suggestions || []).filter(item => item.state === 'applied' && item.applicationMode === 'automatic').length;

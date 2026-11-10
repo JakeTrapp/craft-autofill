@@ -13,6 +13,8 @@ use RuntimeException;
 
 class GeminiProvider extends AbstractHttpProvider implements AiProviderInterface
 {
+    protected const DEFAULT_REQUEST_TIMEOUT = 120;
+
     public function getProviderKey(): string { return 'gemini'; }
 
     protected function getEndpoint(AiModelConfig $config): string

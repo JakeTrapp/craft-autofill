@@ -6,7 +6,8 @@ namespace jtdev\craftautofill\services\fields\adapters;
 
 use craft\base\ElementInterface;
 use craft\base\FieldInterface;
-use craft\elements\Entry;
+use nystudio107\seomatic\fields\SeoSettings;
+use nystudio107\seomatic\models\MetaGlobalVars;
 use RuntimeException;
 
 class SeomaticFieldAdapter implements FieldAdapterInterface
@@ -25,13 +26,6 @@ class SeomaticFieldAdapter implements FieldAdapterInterface
         'seoKeywords',
     ];
 
-    private const SAFE_META_GLOBAL_KEYS = [
-        'seoTitle',
-        'siteNamePosition',
-        'seoDescription',
-        'seoKeywords',
-    ];
-
     public function getKey(): string
     {
         return 'seomatic';
@@ -44,8 +38,7 @@ class SeomaticFieldAdapter implements FieldAdapterInterface
 
     public function supports(FieldInterface $field): bool
     {
-        return class_exists('nystudio107\\seomatic\\fields\\SeoSettings')
-            && $field instanceof \nystudio107\seomatic\fields\SeoSettings;
+        return $field instanceof SeoSettings;
     }
 
     public function getPromptConfigSchema(FieldInterface $field): array
@@ -146,14 +139,20 @@ class SeomaticFieldAdapter implements FieldAdapterInterface
         return $this->normalizeSeoPatch($value) !== [];
     }
 
-    public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
+    public function normalizeSuggestion(FieldInterface $field, mixed $value, ?array $sections = null): array
     {
-        return $this->normalizeSeoPatch($value);
+        return array_intersect_key(
+            $this->normalizeSeoPatch($value),
+            array_filter($sections ?? $this->resolveAllowedPromptSections($field)),
+        );
     }
 
     public function applySuggestionToEntry(FieldInterface $field, ElementInterface $entry, mixed $value): mixed
     {
-        $patch = $this->normalizeSeoPatch($value);
+        $patch = $this->normalizeSuggestion($field, $value);
+        if ($patch === []) {
+            throw new RuntimeException('The suggestion has no values for enabled SEOmatic fields.');
+        }
         $handle = (string)($field->handle ?? '');
         if ($handle === '') {
             throw new RuntimeException('Could not resolve field handle for SEOmatic suggestion apply.');
@@ -218,26 +217,11 @@ class SeomaticFieldAdapter implements FieldAdapterInterface
 
         $base['metaGlobalVars'] = array_intersect_key(
             $base['metaGlobalVars'],
-            array_flip(self::SAFE_META_GLOBAL_KEYS)
+            get_class_vars(MetaGlobalVars::class)
         );
 
-        $assignableMetaGlobalKeys = $this->resolveAssignableMetaGlobalKeys($base);
-
         foreach ($patch as $key => $value) {
-            if ($value === '') {
-                continue;
-            }
-
-            // Prevent SEOmatic model assignment errors by only setting keys that are assignable.
-            if (in_array($key, $assignableMetaGlobalKeys, true)) {
-                $base['metaGlobalVars'][$key] = $value;
-                continue;
-            }
-
-            // Best-effort fallback for source fields: if the key already exists at root, update there.
-            if (array_key_exists($key, $base)) {
-                $base[$key] = $value;
-            }
+            $base['metaGlobalVars'][$key] = $value;
         }
 
         return $base;
@@ -248,12 +232,14 @@ class SeomaticFieldAdapter implements FieldAdapterInterface
      */
     private function resolveAllowedPromptSections(FieldInterface $field): array
     {
-        return [
-            'seoTitle' => true,
-            'siteNamePosition' => true,
-            'seoDescription' => true,
-            'seoKeywords' => true,
-        ];
+        $enabled = $field instanceof SeoSettings && $field->generalTabEnabled
+            ? (array)$field->generalEnabledFields
+            : [];
+
+        return array_combine(self::SUPPORTED_VALUE_KEYS, array_map(
+            static fn(string $key): bool => in_array($key, $enabled, true),
+            self::SUPPORTED_VALUE_KEYS,
+        ));
     }
 
     /**
@@ -286,15 +272,6 @@ class SeomaticFieldAdapter implements FieldAdapterInterface
         }
 
         return false;
-    }
-
-    /**
-     * @param array<string, mixed> $base
-     * @return string[]
-     */
-    private function resolveAssignableMetaGlobalKeys(array $base): array
-    {
-        return self::SAFE_META_GLOBAL_KEYS;
     }
 
     /**

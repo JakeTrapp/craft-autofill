@@ -9,11 +9,12 @@
 
         for (const item of suggestions) {
             if (item.state === 'unchanged') continue;
+            if (item.matchedHandle && item.overrideCurrentValue === false &&
+                (item.hasCurrentValue ?? runtime.hasMeaningfulExistingValue(item.matchedHandle, fieldRoot))) continue;
             if (Array.isArray(item.validationErrors) && item.validationErrors.length) {
                 reviewRequired.push(item);
                 continue;
             }
-            if (item.matchedHandle && item.overrideCurrentValue === false && runtime.hasMeaningfulExistingValue(item.matchedHandle, fieldRoot)) continue;
 
             if (item.matchedHandle && item.requiresApproval === false) {
                 try {

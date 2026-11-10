@@ -5,7 +5,10 @@
 <pk-dialog class="autofill-review-modal" data-autofill-review-modal{% if modalInstanceAttr != '' %} data-autofill-instance-id="{{ modalInstanceAttr }}"{% endif %} size="wide" label="Suggestion Review" disable-pointer-dismissal disable-scroll-lock hidden>
     <div class="autofill-review-modal__header" slot="header">
         <h2 class="autofill-review-modal__title">Suggestion Review</h2>
-        <p class="autofill-review-modal__counter" data-autofill-review-status></p>
+        <div class="autofill-review-modal__progress">
+            <p class="autofill-review-modal__summary" data-autofill-review-summary role="status" hidden></p>
+            <p class="autofill-review-modal__counter" data-autofill-review-status></p>
+        </div>
     </div>
     <div class="autofill-review-modal__loading" data-autofill-review-loading hidden>
         <span class="autofill-review-modal__spinner" aria-hidden="true"></span>

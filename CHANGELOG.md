@@ -1,5 +1,22 @@
 # Release Notes for Autofill
 
+## Unreleased
+
+### Changed
+
+- The review dialog shows how many suggestions were applied and how many already matched saved values. Queued runs show that they are waiting for the Craft queue.
+- Model prompts identify output fields by their unique IDs so fields with the same label can be distinguished.
+- Gemini requests use a 120-second timeout by default, and provider timeouts report which provider timed out.
+
+### Fixed
+
+- Fixed workflows reading, showing, or applying suggestions to custom fields on tabs that are hidden from the current user.
+- Fixed automatic suggestions for Assets fields overwriting edits to selections beyond the configured AI input limit.
+- Fixed Date suggestions accepting values outside configured bounds and relationship suggestions accepting fewer than the required number of selections.
+- Fixed “Only fill empty fields” handling for existing values, including zero and false, when current values are excluded from the prompt.
+- Fixed asset metadata replacing the output field’s current value in prompts for asset workflows.
+- Fixed SEOmatic prompts, settings, and review showing disabled sections, and preserved existing SEO metadata outside the suggested patch.
+
 ## 2.0.0 - 2026-11-07
 
 ### Added

@@ -8,13 +8,16 @@ use Craft;
 use craft\base\Component;
 use craft\base\ElementInterface;
 use craft\elements\Asset;
+use craft\elements\db\ElementQueryInterface;
 use craft\elements\Entry;
 use craft\elements\User;
+use craft\fields\Assets;
 use craft\helpers\Json;
 use jtdev\craftautofill\AutofillPlugin;
 use jtdev\craftautofill\jobs\RunWorkflowJob;
 use jtdev\craftautofill\models\Workflow;
 use jtdev\craftautofill\records\WorkflowRunRecord;
+use jtdev\craftautofill\services\fields\adapters\SeomaticFieldAdapter;
 use RuntimeException;
 use Throwable;
 
@@ -327,12 +330,28 @@ class WorkflowRunService extends Component
         if (!$this->canView($run, $actor)) throw new RuntimeException('This Autofill run is unavailable.');
         $workflow = new Workflow(Json::decode($run->definitionJson));
         $element = $this->element($run);
-        $access = AutofillPlugin::getInstance()->getWorkflowAccess();
+        $plugin = AutofillPlugin::getInstance();
+        $access = $plugin->getWorkflowAccess();
+        $definition = $plugin->getWorkflowService()->asField($workflow);
+        $rows = array_column($definition->rows, null, 'targetFieldUid');
         $suggestions = [];
         foreach ($run->suggestionsJson ? Json::decode($run->suggestionsJson) : [] as $index => $suggestion) {
-            if (!$access->canUseField($workflow, (string)($suggestion['targetFieldUid'] ?? ''), $actor, $element)) continue;
+            $uid = (string)($suggestion['targetFieldUid'] ?? '');
+            if (!$access->canUseField($workflow, $uid, $actor, $element)) continue;
+            if (($suggestion['state'] ?? '') === 'pending' && ($suggestion['reviewEditor']['type'] ?? '') === 'seomaticBasic') {
+                $field = $plugin->getEntryTypeFieldResolverService()->resolveForAutofillField($definition, $uid);
+                $adapter = $field === null ? null : $plugin->getFieldAdapterService()->getAdapterForField($field);
+                if ($adapter instanceof SeomaticFieldAdapter) {
+                    $sections = $adapter->buildPromptContract($field, $rows[$uid] ?? [])['sections'];
+                    $suggestion['reviewEditor']['visibleFields'] = $sections;
+                    $suggestion['value'] = $adapter->normalizeSuggestion($field, $suggestion['value'] ?? null, $sections);
+                    if ($suggestion['value'] === [] && empty($suggestion['validationErrors'])) {
+                        $suggestion['validationErrors'] = ['The suggestion has no values for enabled SEOmatic fields.'];
+                    }
+                }
+            }
             $suggestion['index'] = $index;
-            $suggestion['canApply'] = $access->canUseField($workflow, (string)($suggestion['targetFieldUid'] ?? ''), $actor, $element, true);
+            $suggestion['canApply'] = $access->canUseField($workflow, $uid, $actor, $element, true);
             $suggestions[] = $suggestion;
         }
         $stale = $this->staleness($run, $workflow, $element);
@@ -496,13 +515,13 @@ class WorkflowRunService extends Component
         foreach ($workflow->rows as $row) {
             if (!($row['enabled'] ?? true)) continue;
             $uid = (string)$row['targetFieldUid'];
-            $result['outputs'][$uid] = $this->fingerprint($element, $uid, $row['assets'] ?? []);
+            $result['outputs'][$uid] = $this->fingerprint($element, $uid, $row['assets'] ?? [], output: true);
             if ($row['includeCurrentFieldValue'] ?? true) $result['context'][$uid] = $result['outputs'][$uid];
         }
         return $result;
     }
 
-    private function fingerprint(ElementInterface $element, string $uid, array $assetOptions = []): string
+    private function fingerprint(ElementInterface $element, string $uid, array $assetOptions = [], bool $output = false): string
     {
         if ($uid === '__asset__:file') {
             $value = $this->assetFingerprint($element, $assetOptions);
@@ -512,11 +531,19 @@ class WorkflowRunService extends Component
             $value = null;
             foreach ($element->getFieldLayout()?->getCustomFields() ?? [] as $field) {
                 if ((string)($field->layoutElement->uid ?? $field->uid) !== $uid) continue;
-                $value = $field->serializeValue($element->getFieldValue($field->handle), $element);
-                if ($field instanceof \craft\fields\Assets) {
-                    $assets = $element->getFieldValue($field->handle);
-                    $value = [];
-                    foreach ($assets->limit(max(1, min(20, (int)($assetOptions['maxFiles'] ?? 3))))->all() as $asset) $value[] = $this->assetFingerprint($asset, $assetOptions);
+                $fieldValue = $element->getFieldValue($field->handle);
+                $value = $field->serializeValue($fieldValue, $element);
+                if ($field instanceof Assets) {
+                    $limit = max(1, min(20, (int)($assetOptions['maxFiles'] ?? 3)));
+                    $assets = $fieldValue instanceof ElementQueryInterface
+                        ? (clone $fieldValue)->limit($limit)->all()
+                        : $fieldValue->take($limit);
+                    $inputs = [];
+                    foreach ($assets as $asset) {
+                        $inputs[] = $this->assetFingerprint($asset, $assetOptions);
+                    }
+                    // The input limit does not constrain which relations an output can replace.
+                    $value = $output ? ['selection' => $value, 'inputs' => $inputs] : $inputs;
                 }
                 break;
             }

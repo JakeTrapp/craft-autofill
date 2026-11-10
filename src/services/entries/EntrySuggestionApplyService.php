@@ -71,7 +71,10 @@ class EntrySuggestionApplyService extends Component
             }
 
             $layoutElement = null;
-            foreach ($entry->getFieldLayout()?->getCustomFields() ?? [] as $layoutField) {
+            $layout = $entry->getFieldLayout();
+            $isConsole = Craft::$app->getRequest()->getIsConsoleRequest();
+            $fields = $isConsole ? $layout?->getCustomFields() : $layout?->getVisibleCustomFields($entry);
+            foreach ($fields ?? [] as $layoutField) {
                 if (($layoutField->layoutElement->uid ?? $layoutField->uid) === $targetFieldUid) {
                     $layoutElement = $layoutField->layoutElement;
                     break;
@@ -80,8 +83,7 @@ class EntrySuggestionApplyService extends Component
             if ($layoutElement === null) {
                 throw new RuntimeException('The output field is not part of this content layout.');
             }
-            if (!Craft::$app->getRequest()->getIsConsoleRequest() &&
-                (!$layoutElement->showInForm($entry) || (method_exists($layoutElement, 'editable') && !$layoutElement->editable($entry)))) {
+            if (!$isConsole && method_exists($layoutElement, 'editable') && !$layoutElement->editable($entry)) {
                 throw new RuntimeException('You cannot edit this output field.');
             }
 

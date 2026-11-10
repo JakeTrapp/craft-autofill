@@ -34,14 +34,12 @@ class ResponsePreviewController extends Controller
                 ]);
             }
 
-            AutofillPlugin::getInstance()->getWorkflowRuntimeService()->authorizeField($fieldId, $entryId, $siteId);
-
-            $result = AutofillPlugin::getInstance()->getAiService()->normalizeAutofillResponse(
-                (string)($body['rawResponse'] ?? ''),
-                $fieldId,
-                $entryId,
-                $siteId
-            );
+            $plugin = AutofillPlugin::getInstance();
+            $authorized = $plugin->getWorkflowRuntimeService()->authorizeField($fieldId, $entryId, $siteId);
+            $rawResponse = (string)($body['rawResponse'] ?? '');
+            $result = $authorized === null
+                ? $plugin->getAiService()->normalizeAutofillResponse($rawResponse, $fieldId, $entryId, $siteId)
+                : $plugin->getAiService()->responseNormalizer->normalizeForElement($rawResponse, ...$authorized);
 
             return $this->asJson([
                 'success' => $result->success,

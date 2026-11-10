@@ -46,24 +46,39 @@ class PromptBuilder extends Component
 
             $targetFieldUid = (string)($row['targetFieldUid'] ?? '');
             $targetFieldName = (string)($config['fieldNameByUid'][$targetFieldUid] ?? $targetFieldUid);
-            $targetFieldHandle = (string)($config['fieldHandleByUid'][$targetFieldUid] ?? '');
             $includeCurrentFieldValue = $this->asBool($row['includeCurrentFieldValue'] ?? true);
             $overrideCurrentValue = $this->asBool($row['overrideCurrentValue'] ?? true);
             $currentFieldValue = $config['contextValueByUid'][$targetFieldUid] ?? '';
-            $hasCurrentValue = trim((string)$currentFieldValue) !== '';
+            $hasCurrentValue = $config['hasCurrentValueByUid'][$targetFieldUid] ?? false;
+            $fieldContract = $config['fieldContractsByUid'][$targetFieldUid] ?? [];
+            $adapterKey = $config['fieldAdapterKeyByUid'][$targetFieldUid] ?? '';
 
-            if (!$overrideCurrentValue && $targetFieldHandle !== '' && $hasCurrentValue) {
+            if (!$overrideCurrentValue && $hasCurrentValue) {
+                continue;
+            }
+            if ($adapterKey === 'seomatic' && empty($fieldContract['properties'])) {
                 continue;
             }
 
             $payload = [
+                'targetFieldUid' => $targetFieldUid,
                 'targetFieldName' => $targetFieldName,
                 'prompt' => (string)($row['prompt'] ?? ''),
-                'fieldContract' => $config['fieldContractsByUid'][$targetFieldUid] ?? [],
+                'fieldContract' => $fieldContract,
             ];
 
-            if ($includeCurrentFieldValue && $hasCurrentValue) {
-                $payload['currentFieldValue'] = $currentFieldValue;
+            if ($includeCurrentFieldValue) {
+                $assetMetadata = $config['assetMetadataByUid'][$targetFieldUid] ?? null;
+                if ($assetMetadata !== null) {
+                    if ($adapterKey === 'assets') {
+                        $currentFieldValue = Json::encode($assetMetadata, JSON_UNESCAPED_SLASHES);
+                    } else {
+                        $payload['assetMetadata'] = $assetMetadata;
+                    }
+                }
+                if ($hasCurrentValue && $currentFieldValue !== '') {
+                    $payload['currentFieldValue'] = $currentFieldValue;
+                }
             }
 
             $activeRows[] = $payload;
@@ -77,11 +92,14 @@ class PromptBuilder extends Component
             }
 
             $fieldUid = (string)($row['fieldUid'] ?? '');
+            $assetMetadata = $config['assetMetadataByUid'][$fieldUid] ?? null;
             $activeContextRows[] = [
                 'fieldName' => (string)($config['fieldNameByUid'][$fieldUid] ?? $fieldUid),
                 'fieldType' => (string)($config['fieldContractsByUid'][$fieldUid]['type'] ?? ''),
                 'contextPrompt' => (string)($row['prompt'] ?? ''),
-                'value' => $config['contextValueByUid'][$fieldUid] ?? '',
+                'value' => $assetMetadata === null
+                    ? ($config['contextValueByUid'][$fieldUid] ?? '')
+                    : Json::encode($assetMetadata, JSON_UNESCAPED_SLASHES),
             ];
         }
 
@@ -94,7 +112,7 @@ class PromptBuilder extends Component
             '4) Generation rows to fill',
             '',
             'Return only valid JSON as an object with a suggestions array in generation row order.',
-            'Each object must include: fieldName, value.',
+            'Return at most one suggestion for each generation row. Set fieldName to the exact targetFieldUid from that row and include its value.',
             'Do not include markdown or explanations.',
         ]);
 
@@ -119,7 +137,7 @@ class PromptBuilder extends Component
             Json::encode($activeRows, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
             '',
             'RESPONSE_FORMAT_JSON',
-            '{"suggestions":[{"fieldName":"Example Field","value":"..."}]}',
+            '{"suggestions":[{"fieldName":"example-target-field-uid","value":"..."}]}',
         ]);
     }
 

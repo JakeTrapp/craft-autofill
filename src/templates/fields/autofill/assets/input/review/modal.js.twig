@@ -6,6 +6,8 @@
     runtime.createReviewModal = ({ applySuggestion, rejectSuggestion, focusMatchedField, instanceId, fieldRoot = document }) => {
         let suggestions = [];
         let currentIndex = 0;
+        let appliedCount = 0;
+        let unchangedCount = 0;
         let isLoading = false;
         let wantsOpen = false;
         let correctionMade = false;
@@ -24,6 +26,7 @@
             backdrop: byField('[data-autofill-review-backdrop]'),
             modal: byField('[data-autofill-review-modal]'),
             status: null,
+            summary: null,
             loading: null,
             loadingText: null,
             body: null,
@@ -53,6 +56,7 @@
 
         if (modalState.modal instanceof HTMLElement) {
             modalState.status = modalState.modal.querySelector('[data-autofill-review-status]');
+            modalState.summary = modalState.modal.querySelector('[data-autofill-review-summary]');
             modalState.loading = modalState.modal.querySelector('[data-autofill-review-loading]');
             modalState.loadingText = modalState.modal.querySelector('[data-autofill-review-loading-text]');
             modalState.body = modalState.modal.querySelector('.autofill-review-modal__body');
@@ -118,6 +122,7 @@
             if (modalState.status instanceof HTMLElement) {
                 modalState.status.textContent = '';
             }
+            if (modalState.summary instanceof HTMLElement) modalState.summary.hidden = true;
             if (modalState.loadingText instanceof HTMLElement) {
                 modalState.loadingText.textContent = 'Waiting for response from AI...';
             }
@@ -254,6 +259,7 @@
 
         const showLoading = (message = 'Waiting for response from AI...') => {
             setLoadingState(true, message);
+            if (modalState.summary instanceof HTMLElement) modalState.summary.hidden = true;
             show();
             if (modalState.status instanceof HTMLElement) {
                 modalState.status.textContent = '';
@@ -342,6 +348,12 @@
             const displayMode = current?.reviewEditor?.displayMode || '';
             setModalDisplayMode(displayMode);
             modalState.status.textContent = `${currentIndex + 1} of ${suggestions.length}`;
+            if (modalState.summary instanceof HTMLElement) {
+                modalState.summary.hidden = appliedCount === 0 && unchangedCount === 0;
+                const summary = `${appliedCount} applied · ${unchangedCount} already matched`;
+                modalState.summary.textContent = summary;
+                modalState.summary.title = summary;
+            }
             modalState.field.textContent = current.displayFieldName || current.fieldName || '(Unmatched field)';
             if (modalState.errors instanceof HTMLElement) {
                 if (validationErrors.length) {
@@ -385,10 +397,12 @@
             teardown();
         };
 
-        const setSuggestions = (nextSuggestions) => {
+        const setSuggestions = (nextSuggestions, { applied = 0, unchanged = 0 } = {}) => {
             setLoadingState(false);
             suggestions = Array.isArray(nextSuggestions) ? nextSuggestions : [];
             currentIndex = 0;
+            appliedCount = applied;
+            unchangedCount = unchanged;
             if (suggestions.length) {
                 renderCurrent();
                 return;
@@ -470,6 +484,10 @@
                             ...current,
                             value: current.value,
                         });
+                        if (current.state !== 'applied') {
+                            current.state = 'applied';
+                            appliedCount++;
+                        }
                     } catch (error) {
                         showDecisionError(error.message || 'Suggestion could not be applied to the matched field.');
                         return;

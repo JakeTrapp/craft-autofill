@@ -90,10 +90,10 @@
             };
 
             const next = {
-                seoTitle: read('seoTitle') || current.seoTitle || '',
-                siteNamePosition: read('siteNamePosition') || current.siteNamePosition || '',
-                seoDescription: read('seoDescription') || current.seoDescription || '',
-                seoKeywords: read('seoKeywords') || current.seoKeywords || '',
+                seoTitle: isVisible('seoTitle') ? read('seoTitle') || current.seoTitle : '',
+                siteNamePosition: isVisible('siteNamePosition') ? read('siteNamePosition') || current.siteNamePosition : '',
+                seoDescription: isVisible('seoDescription') ? read('seoDescription') || current.seoDescription : '',
+                seoKeywords: isVisible('seoKeywords') ? read('seoKeywords') || current.seoKeywords : '',
             };
 
             if (next.seoTitle !== '') {

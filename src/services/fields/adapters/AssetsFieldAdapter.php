@@ -78,6 +78,9 @@ class AssetsFieldAdapter implements FieldAdapterInterface
             'Return an object with a selectedAssetIds array.',
             'Each ID must exactly match an assetId in candidates. Do not invent assets or IDs.',
         ];
+        if ($field->allowLimit && $field->minRelations > 0) {
+            $rules[] = sprintf('Select at least %d asset(s).', $field->minRelations);
+        }
         if ($maxSelections !== null) {
             $rules[] = sprintf('Select at most %d asset(s).', $maxSelections);
         }
@@ -131,6 +134,9 @@ class AssetsFieldAdapter implements FieldAdapterInterface
         }
         $ids = $this->normalizeSuggestion($field, $value);
         if (!is_array($ids)) {
+            return false;
+        }
+        if ($field->allowLimit && $field->minRelations > count($ids)) {
             return false;
         }
         if ($field->maxRelations !== null && count($ids) > (int)$field->maxRelations) {
@@ -189,6 +195,9 @@ class AssetsFieldAdapter implements FieldAdapterInterface
         $ids = $this->normalizeSuggestion($field, $value);
         if (!is_array($ids)) {
             throw new RuntimeException('Asset suggestions must contain a selectedAssetIds array of positive IDs.');
+        }
+        if ($field->allowLimit && $field->minRelations > count($ids)) {
+            throw new RuntimeException(sprintf('Select at least %d assets for this field.', $field->minRelations));
         }
         if ($field->maxRelations !== null && count($ids) > (int)$field->maxRelations) {
             throw new RuntimeException(sprintf('Select no more than %d assets for this field.', (int)$field->maxRelations));

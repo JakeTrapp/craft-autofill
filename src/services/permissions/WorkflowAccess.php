@@ -10,6 +10,7 @@ use craft\base\ElementInterface;
 use craft\elements\Asset;
 use craft\elements\Entry;
 use craft\elements\User;
+use craft\models\FieldLayout;
 use jtdev\craftautofill\models\Workflow;
 use RuntimeException;
 
@@ -100,16 +101,22 @@ class WorkflowAccess extends Component
         $layout = $element?->getFieldLayout() ?? ($workflow->scope === 'asset'
             ? Craft::$app->getVolumes()->getVolumeByUid($workflow->volumeUid)?->getFieldLayout()
             : Craft::$app->getEntries()->getEntryTypeByUid($workflow->entryTypeUid)?->getFieldLayout());
-        foreach ($layout?->getCustomFields() ?? [] as $field) {
+        if ($layout === null) return false;
+        $fields = $element === null ? $layout->getCustomFields() : $this->visibleCustomFields($layout, $element, $user);
+        foreach ($fields as $field) {
             if ((string)($field->layoutElement->uid ?? $field->uid) !== $uid) continue;
             $layoutElement = $field->layoutElement;
-            if ($user->admin) return true;
             if ($layoutElement === null) return true;
-            $condition = $layoutElement->getUserCondition();
-            if ($condition !== null && !$condition->matchElement($user)) return false;
-            if ($element !== null) {
-                $condition = $layoutElement->getElementCondition();
-                if ($condition !== null && !$condition->matchElement($element)) return false;
+            if ($element === null) {
+                if ($user->admin) return true;
+                $condition = $layoutElement->getUserCondition();
+                if ($condition !== null && !$condition->matchElement($user)) return false;
+                foreach ($layout->getTabs() as $tab) {
+                    if (!in_array($layoutElement, $tab->getElements(), true)) continue;
+                    $condition = $tab->getUserCondition();
+                    if ($condition !== null && !$condition->matchElement($user)) return false;
+                    break;
+                }
             }
             if ($write && method_exists($layoutElement, 'getEditCondition')) {
                 $condition = $layoutElement->getEditCondition();
@@ -122,6 +129,20 @@ class WorkflowAccess extends Component
             return true;
         }
         return false;
+    }
+
+    private function visibleCustomFields(FieldLayout $layout, ElementInterface $element, User $user): array
+    {
+        $session = Craft::$app->getUser();
+        $previous = $session->getIdentity();
+        if ($previous === $user) return $layout->getVisibleCustomFields($element);
+
+        $session->setIdentity($user);
+        try {
+            return $layout->getVisibleCustomFields($element);
+        } finally {
+            $session->setIdentity($previous);
+        }
     }
 
     public function assertCanSave(Workflow $workflow, ?Workflow $previous, User $user): void

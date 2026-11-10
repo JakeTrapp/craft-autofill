@@ -17,6 +17,7 @@ use jtdev\craftautofill\models\ai\AiGenerationRequest;
 use jtdev\craftautofill\models\ai\AiGenerationResult;
 use jtdev\craftautofill\services\fields\adapters\AbstractRelatedElementsFieldAdapter;
 use jtdev\craftautofill\services\fields\adapters\DateFieldAdapter;
+use jtdev\craftautofill\services\fields\adapters\SeomaticFieldAdapter;
 use Throwable;
 use yii\base\InvalidArgumentException;
 
@@ -138,6 +139,11 @@ class AiResponseNormalizer extends Component
             $adapterKey = (string)($match['adapterKey'] ?? '');
             $relatedConfig = is_array($match['related'] ?? null) ? $match['related'] : [];
             $currentValue = $match['currentValue'] ?? null;
+            $hasCurrentValue = $config['hasCurrentValueByUid'][$targetFieldUid] ?? false;
+            $overrideCurrentValue = $this->asBool($match['overrideCurrentValue'] ?? true);
+            if ($fromModel && !$overrideCurrentValue && $hasCurrentValue) {
+                continue;
+            }
             $validationErrors = [];
 
             if (!$hasRawValue) {
@@ -171,9 +177,7 @@ class AiResponseNormalizer extends Component
                 $validationErrors,
                 $this->validateSuggestionValue($autofillField, $targetFieldUid, $rawValue, $value, $fieldContract)
             );
-            $existingContext = $config['contextValueByUid'][$targetFieldUid] ?? '';
-            if ($hasRawValue && $this->isEmptySuggestion($rawValue, $value, $adapterKey) &&
-                is_string($existingContext) && !in_array(trim($existingContext), ['', '[]', '{}'], true)) {
+            if ($hasRawValue && $hasCurrentValue && $this->isEmptySuggestion($rawValue, $value, $adapterKey)) {
                 $validationErrors[] = 'An empty suggestion cannot erase existing content.';
             }
             [$displayValue, $displayValueIsLabel] = $this->resolveDisplayValue($value, $fieldContract);
@@ -198,7 +202,8 @@ class AiResponseNormalizer extends Component
                 'targetFieldUid' => $targetFieldUid,
                 'matchedHandle' => (string)($match['handle'] ?? ''),
                 'requiresApproval' => $this->asBool($match['requiresApproval'] ?? true),
-                'overrideCurrentValue' => $this->asBool($match['overrideCurrentValue'] ?? true),
+                'overrideCurrentValue' => $overrideCurrentValue,
+                'hasCurrentValue' => $hasCurrentValue,
                 'validationErrors' => array_values(array_unique($validationErrors)),
             ];
         }
@@ -440,6 +445,9 @@ class AiResponseNormalizer extends Component
             $adapter = AutofillPlugin::getInstance()->getFieldAdapterService()->getAdapterForField($field);
             if ($adapter !== null) {
                 try {
+                    if ($adapter instanceof SeomaticFieldAdapter) {
+                        return $adapter->normalizeSuggestion($field, $value, $fieldContract['sections'] ?? null);
+                    }
                     return $adapter->normalizeSuggestion($field, $value);
                 } catch (Throwable) {
                     return '';
@@ -526,7 +534,8 @@ class AiResponseNormalizer extends Component
             if ($adapter !== null) {
                 try {
                     if ($adapter instanceof AbstractRelatedElementsFieldAdapter) {
-                        return $adapter->suggestionValidationErrors($field, $rawValue)
+                        // Retained selections count toward the minimum after merging.
+                        return $adapter->suggestionValidationErrors($field, $rawValue, checkMinimum: false)
                             ?: $adapter->suggestionValidationErrors($field, $normalizedValue);
                     }
                     if (!$adapter->validateSuggestion($field, $rawValue) || !$adapter->validateSuggestion($field, $normalizedValue)) {

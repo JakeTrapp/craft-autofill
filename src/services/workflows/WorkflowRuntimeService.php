@@ -22,6 +22,7 @@ use jtdev\craftautofill\models\ai\AiGenerationResult;
 use jtdev\craftautofill\models\ai\AiModelConfig;
 use jtdev\craftautofill\services\ai\AutofillFieldConfigBuilder;
 use jtdev\craftautofill\services\assets\AssetInputService;
+use jtdev\craftautofill\services\fields\FieldValuePresence;
 use RuntimeException;
 use Throwable;
 
@@ -46,8 +47,8 @@ class WorkflowRuntimeService extends Component
         return [$workflow, AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow), $element];
     }
 
-    /** Authorize legacy field-based endpoints before reading any content. */
-    public function authorizeField(int $fieldId, ?int $elementId, ?int $siteId): void
+    /** @return array{AutofillField, Entry}|null The authorized definition and saved entry, when provided. */
+    public function authorizeField(int $fieldId, ?int $elementId, ?int $siteId): ?array
     {
         $field = Craft::$app->getFields()->getFieldById($fieldId);
         if (!$field instanceof AutofillField) {
@@ -57,25 +58,26 @@ class WorkflowRuntimeService extends Component
             if (!Craft::$app->getRequest()->getIsConsoleRequest() && !Craft::$app->getUser()->getIsAdmin()) {
                 throw new RuntimeException('You do not have permission to preview this workflow.');
             }
-            return;
+            return null;
         }
         $element = Craft::$app->getElements()->getElementById($elementId, Entry::class, $siteId);
         if (!$element instanceof Entry) {
             throw new RuntimeException('The selected entry is unavailable.');
         }
         $this->assertCanSave($element);
+        $actor = Craft::$app->getUser()->getIdentity();
         if ($field->workflowHandle !== '') {
             $workflow = AutofillPlugin::getInstance()->getWorkflowService()->getByHandle($field->workflowHandle);
             if ($workflow === null) { throw new RuntimeException('This workflow is unavailable.'); }
             $this->assertScope($workflow, $element);
-            $actor = Craft::$app->getUser()->getIdentity();
             if ($actor !== null) {
                 AutofillPlugin::getInstance()->getWorkflowAccess()->assertCanRun($workflow, $element, $actor);
-                $this->definitionForActor(AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow), $element, $actor);
             }
+            $field = AutofillPlugin::getInstance()->getWorkflowService()->asField($workflow);
         } elseif ($field->entryTypeUid !== (string)$element->getType()->uid) {
             throw new RuntimeException('This workflow does not support this entry type.');
         }
+        return [$actor !== null ? $this->definitionForActor($field, $element, $actor) : $field, $element];
     }
 
     public function assertScope(Workflow $workflow, ElementInterface $element): void
@@ -459,7 +461,7 @@ class WorkflowRuntimeService extends Component
             $handle = substr($uid, strlen('__native__:'));
             $value = $this->nativeValueForSuggestion($element, $handle, $value);
             $current = $element->getAttributes([$handle])[$handle] ?? null;
-            if (!($row['overrideCurrentValue'] ?? true) && $current !== null && $current !== '') {
+            if (!($row['overrideCurrentValue'] ?? true) && !FieldValuePresence::isEmpty($current, $element)) {
                 throw new RuntimeException('This workflow preserves the existing field value.');
             }
             $element->setAttributes([$handle => $value], false);
@@ -482,7 +484,7 @@ class WorkflowRuntimeService extends Component
             }
             $handle = $field->handle;
             $current = $element->getFieldValue($handle);
-            if (!($row['overrideCurrentValue'] ?? true) && !$field->isValueEmpty($current, $element)) {
+            if (!($row['overrideCurrentValue'] ?? true) && !FieldValuePresence::isEmpty($current, $element, $field)) {
                 throw new RuntimeException('This workflow preserves the existing field value.');
             }
             $adapter = AutofillPlugin::getInstance()->getFieldAdapterService()->getAdapterForField($field);

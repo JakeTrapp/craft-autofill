@@ -57,6 +57,7 @@
                 label: fieldOptionLabel({ ...field, requiresPro }),
                 value,
                 fieldType: String(field?.adapter || ''),
+                seomaticSections: field?.seomaticSections || null,
                 requiresPro,
             });
             nextFieldTypeByUid[value] = String(field?.adapter || '');
@@ -137,7 +138,11 @@
             : null;
         const selectedFieldType = fieldTypeByUid[select.value] || selectedOption?.dataset?.fieldType || '';
         const isSeomatic = String(selectedFieldType).trim().toLowerCase() === 'seomatic';
-        config.hidden = !isSeomatic;
+        const sections = currentFieldOptions.find((option) => option.value === select.value)?.seomaticSections || {};
+        config.hidden = !isSeomatic || !Object.values(sections).some(Boolean);
+        config.querySelectorAll('[data-seomatic-option]').forEach((option) => {
+            option.hidden = sections[option.dataset.seomaticOption] !== true;
+        });
     };
 
     const isRelatedFieldType = (fieldType) => {

@@ -11,6 +11,8 @@ use craft\elements\Asset;
 use craft\elements\Entry;
 use jtdev\craftautofill\AutofillPlugin;
 use jtdev\craftautofill\fields\AutofillField;
+use jtdev\craftautofill\services\assets\AssetInputService;
+use jtdev\craftautofill\services\fields\FieldValuePresence;
 use jtdev\craftautofill\services\fields\adapters\AbstractRelatedElementsFieldAdapter;
 use RuntimeException;
 
@@ -49,6 +51,7 @@ class AutofillFieldConfigBuilder extends Component
         $fieldHandleByUid = [];
         $fieldAdapterKeyByUid = [];
         $contextValueByUid = [];
+        $hasCurrentValueByUid = [];
         $currentValueByUid = [];
 
         foreach ($this->nativeFields() as $uid => $meta) {
@@ -110,8 +113,9 @@ class AutofillFieldConfigBuilder extends Component
                 $fieldHandleByUid[$uid] = (string)($layoutField->handle ?? '');
                 $fieldAdapterKeyByUid[$uid] = $adapter->getKey();
                 $rawValue = $this->resolveCustomFieldRawValue($entry, $layoutField->handle ?? '');
+                $hasCurrentValueByUid[$uid] = $entry !== null && !FieldValuePresence::isEmpty($rawValue, $entry, $layoutField);
                 $readCurrent = isset($contextUids[$uid]) || ($rowPromptConfigByUid[$uid]['includeCurrentFieldValue'] ?? true) || $this->relatedForceUseCurrentValues($rowPromptConfigByUid[$uid] ?? []);
-                $contextValueByUid[$uid] = $readCurrent ? $this->resolveCustomFieldContextValue($rawValue, $layoutField, $adapter) : ($layoutField->isValueEmpty($rawValue, $entry) ? '' : '(existing value)');
+                $contextValueByUid[$uid] = $readCurrent && $hasCurrentValueByUid[$uid] ? $this->resolveCustomFieldContextValue($rawValue, $layoutField, $adapter) : '';
                 if (
                     $adapter instanceof AbstractRelatedElementsFieldAdapter &&
                     $this->relatedForceUseCurrentValues($rowPromptConfigByUid[$uid] ?? [])
@@ -141,12 +145,14 @@ class AutofillFieldConfigBuilder extends Component
             $fieldContractsByUid['__asset__:file'] = ['type' => 'file'];
         }
 
-        if ($entry instanceof ElementInterface) {
-            $inputs = (new \jtdev\craftautofill\services\assets\AssetInputService())->collect($field, $entry, false);
-            foreach ($inputs['metadata'] as $uid => $metadata) {
-                $contextValueByUid[$uid] = json_encode($metadata, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        if ($entry instanceof Entry || $entry instanceof Asset) {
+            $nativeHandles = $entry instanceof Asset ? ['title', 'alt'] : array_column($this->nativeFields(), 'handle');
+            foreach ($nativeHandles as $handle) {
+                $hasCurrentValueByUid['__native__:' . $handle] = !FieldValuePresence::isEmpty($entry->{$handle}, $entry);
             }
         }
+        $assetMetadataByUid = $entry === null ? [] : (new AssetInputService())->collect($field, $entry, false)['metadata'];
+
         return [
             'globalPrompt' => $field->globalPrompt,
             'rows' => $field->rows,
@@ -156,6 +162,8 @@ class AutofillFieldConfigBuilder extends Component
             'fieldContractsByUid' => $fieldContractsByUid,
             'fieldAdapterKeyByUid' => $fieldAdapterKeyByUid,
             'contextValueByUid' => $contextValueByUid,
+            'hasCurrentValueByUid' => $hasCurrentValueByUid,
+            'assetMetadataByUid' => $assetMetadataByUid,
             'currentValueByUid' => $currentValueByUid,
         ];
     }

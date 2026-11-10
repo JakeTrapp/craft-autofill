@@ -14,6 +14,7 @@ use craft\fields\linktypes\Category as CategoryLinkType;
 use craft\fields\linktypes\Entry as EntryLinkType;
 use craft\models\EntryType;
 use jtdev\craftautofill\AutofillPlugin;
+use jtdev\craftautofill\services\fields\adapters\SeomaticFieldAdapter;
 
 class FieldDiscoveryService extends Component
 {
@@ -117,6 +118,9 @@ class FieldDiscoveryService extends Component
 
         if ($field instanceof LinkField) {
             $meta['linkScopeSummary'] = $this->buildLinkScopeSummary($field);
+        }
+        if ($adapterKey === 'seomatic') {
+            $meta['seomaticSections'] = (new SeomaticFieldAdapter())->buildPromptContract($field)['sections'];
         }
 
         return $meta;

@@ -6,13 +6,17 @@ namespace jtdev\craftautofill\services\ai\providers;
 
 use Craft;
 use GuzzleHttp\ClientInterface;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Exception\RequestException;
 use jtdev\craftautofill\models\ai\AiGenerationRequest;
 use jtdev\craftautofill\models\ai\AiModelConfig;
 use RuntimeException;
 
 abstract class AbstractHttpProvider
 {
+    protected const DEFAULT_REQUEST_TIMEOUT = 0;
+
     abstract protected function getEndpoint(AiModelConfig $config): string;
 
     /** @return array<string, string> */
@@ -31,12 +35,19 @@ abstract class AbstractHttpProvider
     {
         $this->validateInputs($request);
         try {
-            $response = $this->createClient()->request('POST', $this->getEndpoint($config), [
+            $client = $this->createClient();
+            $response = $client->request('POST', $this->getEndpoint($config), [
                 'headers' => $this->getHeaders($config) + ['Content-Type' => 'application/json'],
                 'json' => $this->buildPayload($request, $config),
                 'http_errors' => false,
+                'timeout' => $client->getConfig('timeout') ?? static::DEFAULT_REQUEST_TIMEOUT,
             ]);
         } catch (GuzzleException $exception) {
+            if (defined('CURLE_OPERATION_TIMEOUTED') &&
+                ($exception instanceof ConnectException || $exception instanceof RequestException) &&
+                ($exception->getHandlerContext()['errno'] ?? null) === CURLE_OPERATION_TIMEOUTED) {
+                throw new RuntimeException(sprintf('The %s API request timed out.', $config->provider), previous: $exception);
+            }
             throw new RuntimeException('AI provider request failed. Check connectivity and provider configuration.', previous: $exception);
         }
 

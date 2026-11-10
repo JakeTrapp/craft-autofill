@@ -64,16 +64,23 @@ class DateFieldAdapter implements FieldAdapterInterface
     public function buildPromptContract(FieldInterface $field, array $promptConfig = []): array
     {
         $includesTime = $this->includesTime($field);
+        $rules = [
+            $includesTime
+                ? 'Return a valid ISO 8601 date-time string, including time and timezone offset (e.g. 2026-05-10T14:30:00-05:00).'
+                : 'Return a valid ISO 8601 date string in YYYY-MM-DD format.',
+            'Do not return explanatory text.',
+        ];
+        if ($field instanceof Date && $field->min !== null) {
+            $rules[] = 'The earliest allowed date is ' . $field->min->format('Y-m-d') . '.';
+        }
+        if ($field instanceof Date && $field->max !== null) {
+            $rules[] = 'The latest allowed date is ' . $field->max->format('Y-m-d') . '.';
+        }
 
         return [
             'type' => 'string',
             'format' => $includesTime ? 'date-time' : 'date',
-            'rules' => [
-                $includesTime
-                    ? 'Return a valid ISO 8601 date-time string, including time and timezone offset (e.g. 2026-05-10T14:30:00-05:00).'
-                    : 'Return a valid ISO 8601 date string in YYYY-MM-DD format.',
-                'Do not return explanatory text.',
-            ],
+            'rules' => $rules,
         ];
     }
 
@@ -96,15 +103,21 @@ class DateFieldAdapter implements FieldAdapterInterface
 
     public function validateSuggestion(FieldInterface $field, mixed $value): bool
     {
-        if ($value instanceof \DateTimeInterface) {
-            return true;
+        if (!$field instanceof Date) {
+            return false;
         }
-
-        if (!is_string($value)) {
+        if ($value instanceof \DateTimeInterface) {
+            $value = $this->normalizeSuggestion($field, $value);
+        }
+        $date = is_string($value) ? $this->parseSuggestion($field, $value) : null;
+        if ($date === null) {
             return false;
         }
 
-        return $this->parseSuggestion($field, $value) !== null;
+        $min = $field->min === null ? null : \DateTimeImmutable::createFromInterface($field->min)->setTime(0, 0);
+        $max = $field->max === null ? null : \DateTimeImmutable::createFromInterface($field->max)->setTime(23, 59, 59);
+
+        return ($min === null || $date >= $min) && ($max === null || $date <= $max);
     }
 
     public function normalizeSuggestion(FieldInterface $field, mixed $value): mixed
@@ -167,7 +180,7 @@ class DateFieldAdapter implements FieldAdapterInterface
     {
         return $this->includesTime($field)
             ? self::parseDateTime($value)
-            : self::parseDate(trim($value), 'Y-m-d');
+            : self::parseDate(trim($value), 'Y-m-d', new \DateTimeZone(Craft::$app->getTimeZone()));
     }
 
     public static function parseDateTime(string $value, ?\DateTimeZone $localTimeZone = null): ?\DateTimeImmutable

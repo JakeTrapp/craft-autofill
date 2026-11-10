@@ -65,16 +65,20 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
         $maxRule = $maxSelections !== null
             ? sprintf('Select at most %d title(s).', $maxSelections)
             : 'Select as many titles as needed.';
+        $rules = [
+            'Return JSON only.',
+            'Return an object with a selectedTitles array.',
+            'Each selected title must exactly match one candidate title.',
+            'Omit choices that have no exact match in the candidate list.',
+            $maxRule,
+        ];
+        if ($field instanceof BaseRelationField && $field->allowLimit && $field->minRelations > 0) {
+            $rules[] = sprintf('Select at least %d title(s), including any current selections that must be retained.', $field->minRelations);
+        }
 
         return [
             'type' => 'object',
-            'rules' => [
-                'Return JSON only.',
-                'Return an object with a selectedTitles array.',
-                'Each selected title must exactly match one candidate title.',
-                'Omit choices that have no exact match in the candidate list.',
-                $maxRule,
-            ],
+            'rules' => $rules,
             'properties' => [
                 'selectedTitles' => [
                     'type' => 'array',
@@ -128,7 +132,7 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
     }
 
     /** @return string[] */
-    public function suggestionValidationErrors(FieldInterface $field, mixed $value): array
+    public function suggestionValidationErrors(FieldInterface $field, mixed $value, bool $checkMinimum = true): array
     {
         $rawTitles = $this->rawSuggestedTitles($value);
         if ($rawTitles === null) {
@@ -144,6 +148,9 @@ abstract class AbstractRelatedElementsFieldAdapter implements FieldAdapterInterf
             return ['Return a selectedTitles array of exact titles.'];
         }
         $errors = [];
+        if ($checkMinimum && $field instanceof BaseRelationField && $field->allowLimit && $field->minRelations > count($titles)) {
+            $errors[] = sprintf('This field requires at least %d selections. The suggestion contains %d.', $field->minRelations, count($titles));
+        }
         $max = $this->maxSelections($field);
         if ($max !== null && count($titles) > $max) {
             $errors[] = sprintf('This field allows at most %d selections. The suggestion contains %d.', $max, count($titles));

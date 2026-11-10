@@ -5,7 +5,7 @@ import HelpTip from './HelpTip.vue';
 import SortableFields from './SortableFields.vue';
 import NativeFieldPicker from './NativeFieldPicker.vue';
 
-type FieldOption = { iconSvg?: string; uid: string; name: string; handle?: string; adapter?: string; availableInLiteVersion?: boolean; contextOnly?: boolean };
+type FieldOption = { iconSvg?: string; uid: string; name: string; handle?: string; adapter?: string; availableInLiteVersion?: boolean; contextOnly?: boolean; seomaticSections?: Record<string, boolean> };
 type Workflow = {
   id: number | null; uid?: string; handle: string; name: string; description: string; scope: 'entry' | 'asset';
   entryTypeUid: string; volumeUid: string; modelConfigUid: string; globalPrompt: string;
@@ -177,6 +177,7 @@ watch(() => workflow.name, (name, previous) => {
 });
 function hasAdapterOptions(row: any) { return ['seomatic', 'entries', 'categories', 'tags', 'link', 'assets'].includes(adapterFor(row.targetFieldUid)); }
 function adapterFor(uid: string) { return fields.value.find(field => field.uid === uid)?.adapter || ''; }
+function seomaticSections(uid: string) { return fields.value.find(field => field.uid === uid)?.seomaticSections || {}; }
 function canShowRelated(row: any) { return ['entries', 'categories', 'tags'].includes(adapterFor(row.targetFieldUid)); }
 function selectedContextIsAssets(row: any) { return adapterFor(row.fieldUid) === 'assets' || row.fieldUid === '__asset__:file'; }
 function rowError(path: string) { return errors.value[path]?.[0] || ''; }
@@ -347,10 +348,11 @@ function updateValue(target: any, key: string, event: Event, numeric = false) {
             <details v-if="hasAdapterOptions(row)" class="af-format-help"><summary>Field-specific options</summary>
               <div v-if="adapterFor(row.targetFieldUid) === 'seomatic'" class="af-toggle-list">
                 <strong>SEO prompt includes</strong>
-                <Checkbox class="af-toggle" :checked="row.seomatic.includeSeoTitle" @update:checked="row.seomatic.includeSeoTitle = $event">SEO title and source</Checkbox>
-                <Checkbox class="af-toggle" :checked="row.seomatic.includeSiteNamePosition" @update:checked="row.seomatic.includeSiteNamePosition = $event">Site name position and source</Checkbox>
-                <Checkbox class="af-toggle" :checked="row.seomatic.includeSeoDescription" @update:checked="row.seomatic.includeSeoDescription = $event">SEO description and source</Checkbox>
-                <Checkbox class="af-toggle" :checked="row.seomatic.includeSeoKeywords" @update:checked="row.seomatic.includeSeoKeywords = $event">SEO keywords and source</Checkbox>
+                <Checkbox v-if="seomaticSections(row.targetFieldUid).seoTitle" class="af-toggle" :checked="row.seomatic.includeSeoTitle" @update:checked="row.seomatic.includeSeoTitle = $event">SEO title and source</Checkbox>
+                <Checkbox v-if="seomaticSections(row.targetFieldUid).siteNamePosition" class="af-toggle" :checked="row.seomatic.includeSiteNamePosition" @update:checked="row.seomatic.includeSiteNamePosition = $event">Site name position and source</Checkbox>
+                <Checkbox v-if="seomaticSections(row.targetFieldUid).seoDescription" class="af-toggle" :checked="row.seomatic.includeSeoDescription" @update:checked="row.seomatic.includeSeoDescription = $event">SEO description and source</Checkbox>
+                <Checkbox v-if="seomaticSections(row.targetFieldUid).seoKeywords" class="af-toggle" :checked="row.seomatic.includeSeoKeywords" @update:checked="row.seomatic.includeSeoKeywords = $event">SEO keywords and source</Checkbox>
+                <p v-if="!Object.values(seomaticSections(row.targetFieldUid)).some(Boolean)">Enable supported SEO sections in the SEOmatic field settings.</p>
               </div>
               <div v-if="canShowRelated(row)" class="af-grid" style="margin-top:14px">
                 <label><span class="af-label">Related selection</span><div class="select fullwidth"><select v-model="row.related.mode"><option value="topN">Top N</option><option value="all">All</option></select></div></label>
