@@ -1123,7 +1123,8 @@ class AiResponseNormalizer extends Component
     private function iconSvgForValue(mixed $value): string
     {
         $icon = trim((string)$value);
-        if ($icon === '') {
+        // Only Craft system icon names. Cp::iconSvg() also accepts file paths and markup, which a model must not choose.
+        if ($icon === '' || !preg_match('/^[\da-z\-]+$/', $icon)) {
             return '';
         }
 

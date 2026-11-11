@@ -1,5 +1,12 @@
 # Release Notes for Autofill
 
+## Unreleased
+
+### Security
+
+- Rich text in the review dialog is now sanitized with an allow-list, so AI-written HTML can’t run scripts, load frames or use unsafe links when it’s shown for editing.
+- Icon suggestions only accept Craft’s built-in icon names.
+
 ## 2.1.0 - 2026-11-09
 
 ### Added
