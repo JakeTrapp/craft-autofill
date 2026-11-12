@@ -14,6 +14,12 @@ class Settings extends Model
     public bool $testMode = false;
 
     /**
+     * Whether runs started by AI agents (through Craft’s MCP server) may apply outputs that are set to apply
+     * automatically. When off, those outputs wait for review like every other output on an agent’s run.
+     */
+    public bool $allowAgentAutomaticOutputs = false;
+
+    /**
      * Seconds to wait for one AI provider response. Set in config/autofill.php; there's no control panel setting.
      * Reasoning models may need 60–120 seconds.
      */
@@ -39,7 +45,7 @@ class Settings extends Model
     public function rules(): array
     {
         return [
-            ['testMode', 'boolean'],
+            [['testMode', 'allowAgentAutomaticOutputs'], 'boolean'],
             ['requestTimeout', 'integer', 'min' => AiModelConfig::MIN_TIMEOUT, 'max' => AiModelConfig::MAX_TIMEOUT],
             ['maxOutputTokens', 'integer', 'min' => AiModelConfig::MIN_OUTPUT_TOKENS, 'max' => AiModelConfig::MAX_OUTPUT_TOKENS],
             ['modelConfigs', 'validateModelConfigs'],

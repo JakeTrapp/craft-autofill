@@ -5,6 +5,7 @@ The repository has separate local and Craft-backed suites:
 - `composer test:unit` runs fast PHPUnit tests without Craft or a database.
 - `composer test:integration` uses the ignored `testbench/` runtime and DDEV MySQL 8 to install Craft into a disposable marked database, then runs the Craft persistence suite. It does not contact AI providers.
 - `npm run test:browser` runs Playwright from the repository root, separately from Codeception.
+- `tests/mcp/run` calls Autofill’s MCP tools through Craft’s stdio MCP server (`craft mcp/serve`) as the fixture users, the way an agent would. It needs Craft 5.12 or later in the testbench and Python 3. Like the browser suite, it rebuilds and seeds `db_test`, and answers runs with the fixture provider.
 
 For root unit tests, install PHP 8.2+ and Composer, then run `composer install` in the repository. Integration tests also need Docker and DDEV. Browser tests need Node/npm, Chromium installed by Playwright, and host PHP with Craft's required extensions, including `pdo_mysql` and GD. The browser server uses host PHP to connect to DDEV's published MySQL port. Rebuilding the optional frontend sources requires Node 20.19+ or 22.12+; customer sites use the shipped compiled assets.
 

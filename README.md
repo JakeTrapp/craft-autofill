@@ -36,9 +36,15 @@ Lite includes one saved workflow, background generation, and single-item review.
 
 [Permissions and sharing](https://www.jtdevelop.com/development/plugins/autofill#permissions) · [Compare Lite and Pro](https://www.jtdevelop.com/development/plugins/autofill#lite-vs-pro-edition)
 
+## Set up with your AI agent
+
+AI agents such as Claude, ChatGPT and Cursor can set up and run Autofill through Craft’s MCP server.
+
+[Set up AI agents](https://www.jtdevelop.com/development/plugins/autofill#ai-agents-mcp)
+
 ## Get started
 
-Autofill requires Craft CMS 5.0 or later, PHP 8.2 or later, an enabled AI model, and a working Craft queue. It supports OpenAI, Anthropic, DeepSeek, and Google Gemini model configurations.
+Autofill requires Craft CMS 5.12.1 or later, PHP 8.2 or later, an enabled AI model, and a working Craft queue. It supports OpenAI, Anthropic, DeepSeek, and Google Gemini model configurations.
 
 Install Autofill from the Craft Plugin Store, or run:
 

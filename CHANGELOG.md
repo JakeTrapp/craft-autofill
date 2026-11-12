@@ -1,5 +1,17 @@
 # Release Notes for Autofill
 
+## 2.2.0 - 2026-11-11
+
+### Changed
+
+- Autofill now requires Craft CMS 5.12.1 or later.
+
+### Added
+
+- Added tools for Craft’s built-in MCP server, so AI agents can learn Autofill, find fields, create and update workflows, preview prompts, run workflows and read their results. Agents work as the signed-in user, within Autofill’s permissions and edition limits.
+- Every output an agent creates requires review. Agents can’t add, change or remove outputs that apply automatically, and can’t accept, reject or dismiss results; they can only cancel runs that haven’t finished.
+- Added the “Let AI agents apply automatic outputs” setting (`allowAgentAutomaticOutputs`), off by default. While it’s off, runs an agent starts hold outputs set to apply automatically for review too.
+
 ## 2.1.1 - 2026-11-10
 
 ### Security

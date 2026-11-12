@@ -38,6 +38,7 @@ use yii\base\ModelEvent;
  * @method FieldAdapterService getFieldAdapterService()
  * @method FieldDiscoveryService getFieldDiscoveryService()
  * @method EntryTypeFieldResolverService getEntryTypeFieldResolverService()
+ * @method \jtdev\craftautofill\services\agents\AgentApi getAgentApi()
  * @author JTDev <jake.trapp02@gmail.com>
  * @copyright JTDev
  * @license https://craftcms.github.io/license/ Craft License
@@ -74,6 +75,7 @@ class AutofillPlugin extends Plugin
                 'fieldAdapterService' => FieldAdapterService::class,
                 'fieldDiscoveryService' => FieldDiscoveryService::class,
                 'entryTypeFieldResolverService' => EntryTypeFieldResolverService::class,
+                'agentApi' => \jtdev\craftautofill\services\agents\AgentApi::class,
             ],
         ];
     }
@@ -197,8 +199,12 @@ class AutofillPlugin extends Plugin
         } else {
             unset($item['subnav']['bulk']);
         }
-        if ($actor && !$this->getWorkflowAccess()->can($actor, 'bulk')) unset($item['subnav']['bulk']);
-        if (!Craft::$app->getUser()->getIsAdmin()) unset($item['subnav']['logs']);
+        if ($actor && !$this->getWorkflowAccess()->can($actor, 'bulk')) {
+            unset($item['subnav']['bulk']);
+        }
+        if (!Craft::$app->getUser()->getIsAdmin()) {
+            unset($item['subnav']['logs']);
+        }
         if (Craft::$app->getUser()->getIdentity() !== null) {
             $item['subnav'] = ['workflows' => ['label' => 'Workflows', 'url' => 'autofill/workflows']] + $item['subnav'];
         }
@@ -246,8 +252,38 @@ class AutofillPlugin extends Plugin
         ];
     }
 
+    /**
+     * Registers Autofill’s tools with Craft’s built-in MCP server, which Craft 5.12 added.
+     */
+    private function attachMcpHandlers(): void
+    {
+        if (!class_exists(\craft\services\Mcp::class)) {
+            return;
+        }
+
+        Event::on(\craft\services\Mcp::class, \craft\services\Mcp::EVENT_REGISTER_CAPABILITY_TYPES,
+            static function(RegisterComponentTypesEvent $event): void {
+                $event->types[] = \jtdev\craftautofill\mcp\AutofillTools::class;
+            }
+        );
+
+        $canUseAutofill = static function(): bool {
+            $user = Craft::$app->getUser()->getIdentity();
+            return $user instanceof \craft\elements\User && ($user->admin || $user->can('accessPlugin-autofill'));
+        };
+        Event::on(\craft\mcp\AdminInstructions::class, \craft\mcp\AdminInstructions::EVENT_COLLECT_SERVER_INSTRUCTIONS,
+            static function(\craft\mcp\events\CollectingServerInstructions $event) use ($canUseAutofill): void {
+                if ($canUseAutofill()) {
+                    $event->instructions[] = 'Autofill (autofill_* tools) configures and runs AI workflows that suggest values for entry and asset fields. Suggestions always wait for a person to review them. Call autofill_guide before using it.';
+                }
+            }
+        );
+    }
+
     private function attachEventHandlers(): void
     {
+        $this->attachMcpHandlers();
+
         Event::on(\craft\services\UserPermissions::class, \craft\services\UserPermissions::EVENT_REGISTER_PERMISSIONS,
             static function(\craft\events\RegisterUserPermissionsEvent $event): void {
                 $event->permissions[] = [
@@ -264,7 +300,9 @@ class AutofillPlugin extends Plugin
                 }
                 $plugin = self::getInstance();
                 $actor = Craft::$app->getUser()->getIdentity();
-                if ($actor === null) return;
+                if ($actor === null) {
+                    return;
+                }
                 $rendered = [];
                 $sidebarHtml = '';
                 // Inbox links reopen the exact saved run on its original editor,
@@ -294,15 +332,21 @@ class AutofillPlugin extends Plugin
                         $plugin->getWorkflowRuntimeService()->assertScope($workflow, $element);
                         $plugin->getWorkflowRuntimeService()->assertCanSave($element);
                         $actor = Craft::$app->getUser()->getIdentity();
-                        if ($actor === null) continue;
+                        if ($actor === null) {
+                            continue;
+                        }
                         $plugin->getWorkflowAccess()->assertCanRun($workflow, $element, $actor);
                     } catch (\Throwable) {
                         continue;
                     }
                     foreach ($element->getFieldLayout()?->getCustomFields() ?? [] as $inlineField) {
-                        if ($inlineField instanceof AutofillField && $inlineField->workflowHandle === $workflow->handle) $rendered[$workflow->id] = true;
+                        if ($inlineField instanceof AutofillField && $inlineField->workflowHandle === $workflow->handle) {
+                            $rendered[$workflow->id] = true;
+                        }
                     }
-                    if (!$workflow->showOnSidebar) continue;
+                    if (!$workflow->showOnSidebar) {
+                        continue;
+                    }
                     $rendered[$workflow->id] = true;
                     $field = $plugin->getWorkflowService()->asField($workflow);
                     $sidebarHtml .= Craft::$app->getView()->renderTemplate('autofill/fields/autofill/input', [
@@ -312,7 +356,9 @@ class AutofillPlugin extends Plugin
                 }
                 if ($element->id && Craft::$app->getDb()->tableExists(\jtdev\craftautofill\records\WorkflowRunRecord::tableName())) {
                     foreach ($plugin->getWorkflowRunService()->pendingForElement((int)$element->id, (int)$element->siteId, $actor) as $run) {
-                        if (isset($rendered[$run->workflowId])) continue;
+                        if (isset($rendered[$run->workflowId])) {
+                            continue;
+                        }
                         $snapshot = new \jtdev\craftautofill\models\Workflow(\craft\helpers\Json::decode($run->definitionJson));
                         $snapshot->showUserPromptInput = false;
                         $rendered[$run->workflowId] = true;

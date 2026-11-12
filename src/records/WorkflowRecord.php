@@ -23,6 +23,13 @@ use craft\db\ActiveRecord;
  * @property bool $showOnSidebar
  * @property string $rowsJson
  * @property string $contextRowsJson
+ * @property int|null $ownerId
+ * @property string $visibility
+ * @property bool $adminManaged
+ * @property bool $archived
+ * @property string $dateCreated
+ * @property string $dateUpdated
+ * @property string $uid
  */
 class WorkflowRecord extends ActiveRecord
 {

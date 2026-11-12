@@ -217,6 +217,14 @@
     on: settings.testMode ?? true,
 }) }}
 
+{{ forms.lightswitchField({
+    label: 'Let AI agents apply automatic outputs',
+    instructions: 'When off, runs started by AI agents through Craft’s MCP server (Craft 5.12+) hold every output for review, including outputs set to apply automatically. Turn on to let those outputs apply on agent runs too.',
+    id: 'allowAgentAutomaticOutputs',
+    name: 'allowAgentAutomaticOutputs',
+    on: settings.allowAgentAutomaticOutputs ?? false,
+}) }}
+
 {% css %}
 {% include 'autofill/fields/autofill/assets/settings/index.css.twig' %}
 {% endcss %}
