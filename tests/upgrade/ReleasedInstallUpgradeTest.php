@@ -87,6 +87,9 @@ final class ReleasedInstallUpgradeTest extends Unit
         self::assertInstanceOf(Entry::class, $entry);
         self::assertSame('Existing editorial content', (string)$entry->getFieldValue('upgradeContent'));
         self::assertNotNull(Craft::$app->getDb()->getTableSchema('{{%autofill_runs}}', true)->getColumn('privateOwnerId'));
+        self::assertNotNull(Craft::$app->getDb()->getTableSchema('{{%autofill_runs}}', true)->getColumn('automationId'));
+        self::assertTrue(Craft::$app->getDb()->tableExists(\jtdev\craftautofill\records\AutomationRecord::tableName()));
+        self::assertTrue(Craft::$app->getDb()->tableExists(\jtdev\craftautofill\records\AutomationStateRecord::tableName()));
         $count = count($service->getAll());
         Craft::$app->getUpdates()->runMigrations(['autofill']);
         self::assertCount($count, $service->getAll(), 'A repeated migration does not duplicate workflows.');

@@ -18,6 +18,7 @@ type BrowserFixture = {
   targetFieldHandle: string;
   outputFields: Array<{ name: string; handle: string }>;
   assetId: number;
+  assetWorkflowHandle: string;
   bulkAsset: { id: number; path: string };
   archiveAsset: { id: number; path: string };
   assetEditorPath: string;
@@ -61,6 +62,25 @@ async function addWorkflowField(page: import('@playwright/test').Page, kind: 'co
   await expect(picker).toBeHidden();
   await expect(section.locator('.af-sort-item')).toHaveCount(count + 1);
 }
+
+test('hourly automation saves the interval and minute selected in the control panel', async ({ page }) => {
+  const data = fixture();
+  await login(page, data);
+  await page.goto(`/admin/autofill/automations/new?workflow=${encodeURIComponent(data.assetWorkflowHandle)}`);
+
+  const name = `Hourly content review ${Date.now()}`;
+  await page.getByRole('textbox', { name: /^Name\b/ }).fill(name);
+  await page.getByRole('switch', { name: 'On a schedule', exact: true }).click();
+  await page.getByRole('combobox', { name: 'Repeat', exact: true }).selectOption({ label: 'Every few hours' });
+  await page.getByRole('combobox', { name: 'Every', exact: true }).selectOption({ label: '4 hours' });
+  await page.getByRole('combobox', { name: 'At minute', exact: true }).selectOption({ label: ':30' });
+  await page.locator('#header').getByRole('button', { name: /save/i }).click();
+
+  await expect(page).toHaveURL(/\/admin\/autofill\/automations\/?$/);
+  const row = page.getByRole('row').filter({ hasText: name });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText('Every 4 hours at :30');
+});
 
 test('create workflow, configure field, generate, review, and persist', async ({ page }) => {
   const data = fixture();
@@ -460,7 +480,7 @@ test('bulk asset generation persists results and supports review from the inbox'
     has: page.locator(`[href$="/autofill/inbox/${runId}"]`),
   });
   await expect(row).toContainText('Browser asset workflow');
-  await expect(row.getByRole('cell', { name: data.username, exact: true })).toBeVisible();
+  await expect(row.getByRole('cell', { name: data.username })).toContainText(data.username);
   await expect(row.getByText('Review', { exact: true })).toBeVisible();
   await expect(row.getByRole('link', { name: 'View results' })).toHaveCount(0);
   await expect(row).toBeVisible();

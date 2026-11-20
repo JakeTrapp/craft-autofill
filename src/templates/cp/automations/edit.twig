@@ -1,0 +1,605 @@
+{% extends '_layouts/cp.twig' %}
+{% import '_includes/forms.twig' as forms %}
+{% set selectedSubnavItem = 'automations' %}
+{% set fullPageForm = workflow is not null %}
+{% set title = isNew ? 'New automation'|t('autofill') : automation.name %}
+{% set crumbs = [{label: 'Automations'|t('autofill'), url: url('autofill/automations')}] %}
+
+{% set schedule = automation.schedule %}
+{% set isAsset = workflow and workflow.scope == 'asset' %}
+{% set locale = craft.app.formattingLocale %}
+{# ISO weekdays (1 = Monday) as select options. Twig renumbers integer map keys, so use a list. #}
+{% set weekdayOptions = [] %}
+{% for n in 1..7 %}{% set weekdayOptions = weekdayOptions|merge([{label: locale.getWeekDayName(n % 7), value: n}]) %}{% endfor %}
+{% set frequencyValue = schedule.frequency == 'monthly' and schedule.monthMode == 'weekday' ? 'monthlyWeekday' : schedule.frequency %}
+{# Preselect a day for frequencies that aren't saved yet, so switching to them doesn't start empty. #}
+{% set weekdaysOn = schedule.weekdays ?: (frequencyValue != 'weekly' ? [1] : []) %}
+{% set datesOn = schedule.monthDates ?: (frequencyValue != 'monthly' ? [1] : []) %}
+{% set changesOn = automation.events.enabled or automation.fields.enabled %}
+{% set changeTypes = automation.events.enabled ? automation.events.types : [] %}
+{% if automation.fields.enabled %}{% set changeTypes = changeTypes|merge(['fields']) %}{% endif %}
+{% set changeDelay = changesOn ? max(automation.events.enabled ? automation.events.delay : 0, automation.fields.enabled ? automation.fields.delay : 0) : 5 %}
+{% set hasAdvanced = automation.maxItemsPerRun or automation.minMinutesBetweenRuns or automation.maxRuns or automation.userPrompt or automation.privateOwnerId
+    or automation.getErrors('userPrompt') or automation.getErrors('maxItemsPerRun') or automation.getErrors('minMinutesBetweenRuns') or automation.getErrors('maxRuns') %}
+
+{% if not isNew %}
+    {% set formActions = [{
+        label: 'Save and continue editing'|t('app'),
+        redirect: ('autofill/automations/' ~ automation.id)|hash,
+        shortcut: true,
+        retainScroll: true,
+    }] %}
+    {% set actionMenu = disclosureMenu([
+        {label: 'Run now'|t('autofill'), icon: 'play', action: 'autofill/automations/run', params: {id: automation.id}, redirect: 'autofill/automations/' ~ automation.id,
+         confirm: (isAsset ? 'Run “{name}” on every matching asset now? Assets unchanged since their last run are skipped.' : 'Run “{name}” on every matching entry now? Entries unchanged since their last run are skipped.')|t('autofill', {name: automation.name}),
+         hidden: workflow is null, disabled: automation.isPaused(), attributes: automation.isPaused() ? {disabled: true} : {}},
+        {label: 'View results'|t('autofill'), icon: 'inbox', url: url('autofill/inbox', {automation: automation.id})},
+        {hr: true},
+        {label: 'Delete'|t('app'), icon: 'trash', action: 'autofill/automations/delete', params: {id: automation.id}, confirm: 'Delete “{name}”? Results it already created stay in the inbox.'|t('autofill', {name: automation.name}), redirect: 'autofill/automations', destructive: true},
+    ], {
+        hiddenLabel: 'Actions'|t('app'),
+        buttonAttributes: {id: 'action-btn', class: ['action-btn', 'hairline-dark', 'm'], title: 'Actions'|t('app')},
+    }) %}
+{% endif %}
+
+{% if workflow and automation.isPaused() %}
+    {% set contentNotice %}
+        <div class="content-notice">
+            <div class="content-notice-icon" aria-hidden="true"><div class="cp-icon">{{ iconSvg('pause') }}</div></div>
+            <p>
+                {{ 'Paused. {reason}'|t('autofill', {reason: automation.pausedReason|t('autofill')}) }}
+                {% if not workflow.archived %}{{ needsAcknowledgement ? 'Tick “Let this automation apply fields that skip review” and save to resume.'|t('autofill') : 'Save to resume.'|t('autofill') }}{% endif %}
+            </p>
+        </div>
+    {% endset %}
+{% endif %}
+
+{% if automation.getFirstError('workflowId') %}
+    {% set errorSummary %}
+        <div class="error-summary" tabindex="-1">
+            <div>
+                <span class="notification-icon" data-icon="alert" role="img" aria-label="{{ 'Error'|t('app') }}"></span>
+                <h2>{{ 'Couldn’t save the automation.'|t('autofill') }}</h2>
+            </div>
+            <ul class="errors"><li>{{ automation.getFirstError('workflowId') }}</li></ul>
+        </div>
+    {% endset %}
+    {% js %}document.querySelector('.error-summary')?.focus();{% endjs %}
+{% endif %}
+
+{% block details %}
+    {% if workflow %}
+        <fieldset>
+            <legend class="h6">{{ 'Status'|t('app') }}</legend>
+            <div class="meta">
+                {{ forms.lightswitchField({
+                    label: 'Enabled'|t('app'),
+                    id: 'enabled',
+                    name: 'enabled',
+                    on: automation.enabled,
+                }) }}
+            </div>
+        </fieldset>
+        <dl class="meta read-only">
+            <div class="data">
+                <dt class="heading">{{ 'Workflow'|t('autofill') }}</dt>
+                <dd class="value gap-s">
+                    <span class="flex-grow">{{ workflow.name }}</span>
+                    {% if isNew and canChangeWorkflow %}<a class="nowrap" href="{{ url('autofill/automations/new') }}">{{ 'Change'|t('autofill') }}</a>{% endif %}
+                </dd>
+            </div>
+            {% if not isNew %}
+                {% if automation.isActive() and automation.nextRunAt %}
+                    <div class="data">
+                        <dt class="heading">{{ 'Next run'|t('autofill') }}</dt>
+                        <dd class="value">{{ automation.nextRunAt|timestamp('short') }}</dd>
+                    </div>
+                {% endif %}
+                <div class="data">
+                    <dt class="heading">{{ 'Last run'|t('autofill') }}</dt>
+                    <dd class="value"><div>{% include 'autofill/cp/automations/_last-run' %}</div></dd>
+                </div>
+                {% if runAs %}
+                    <div class="data">
+                        <dt class="heading">{{ 'Runs as'|t('autofill') }}</dt>
+                        <dd class="value"><div>{{ runAs.name }}{% if runAs.id != currentUser.id %}<div class="smalltext light">{{ 'Saving makes it run as you.'|t('autofill') }}</div>{% endif %}</div></dd>
+                    </div>
+                {% endif %}
+                {% if automaticFields and not needsAcknowledgement %}
+                    <div class="data">
+                        <dt class="heading">{{ 'Skips review'|t('autofill') }}</dt>
+                        <dd class="value">{{ automaticFields|join(', ') }}</dd>
+                    </div>
+                {% endif %}
+                {% if owner and owner.id != (runAs.id ?? null) %}
+                    <div class="data">
+                        <dt class="heading">{{ 'Owner'|t('autofill') }}</dt>
+                        <dd class="value">{{ owner.name }}</dd>
+                    </div>
+                {% endif %}
+            {% endif %}
+        </dl>
+    {% endif %}
+{% endblock %}
+
+{% block content %}
+    {% if workflow is null and not isNew %}
+        <p class="zilch">{{ 'Its workflow was deleted, so this automation can’t run. Results it created stay in the inbox.'|t('autofill') }}</p>
+    {% elseif workflow is null %}
+        <h2>{{ 'Choose a workflow'|t('autofill') }}</h2>
+        {% if workflowCards is empty %}
+            <p class="zilch">{{ 'No workflows are available to automate.'|t('autofill') }}</p>
+        {% else %}
+            <ul class="card-grid">
+                {% for card in workflowCards %}
+                    <li>
+                        <div class="card">
+                            <div class="card-titlebar">
+                                <div class="flex flex-nowrap">
+                                    {% if card.icon %}<div class="cp-icon small" aria-hidden="true">{{ card.icon|raw }}</div>{% endif %}
+                                    <div class="card-titlebar-label">{{ card.scopeName ?: 'Unavailable'|t('autofill') }}</div>
+                                </div>
+                            </div>
+                            <div class="card-main">
+                                <div class="card-content">
+                                    <div class="card-heading">
+                                        <div class="label">
+                                            <a class="label-link" href="{{ url('autofill/automations/new', {workflow: card.workflow.handle}) }}"><span>{{ card.workflow.name }}</span></a>
+                                        </div>
+                                    </div>
+                                    {% if card.workflow.description %}
+                                        <div class="card-body"><p class="light">{{ card.workflow.description }}</p></div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+    {% else %}
+        {{ actionInput('autofill/automations/save') }}
+        {{ redirectInput('autofill/automations') }}
+        {% if automation.id %}{{ hiddenInput('automationId', automation.id) }}{% endif %}
+        {{ hiddenInput('workflowId', workflow.id) }}
+
+        {% if needsAcknowledgement %}
+            {{ forms.checkboxField({
+                id: 'confirmAutomatic',
+                name: 'confirmAutomatic',
+                label: 'Let this automation apply fields that skip review'|t('autofill'),
+                value: '1',
+                checked: craft.app.request.getBodyParam('confirmAutomatic') == '1',
+                warning: 'Saves {fields} without review.'|t('autofill', {fields: automaticFields|join(', ')}),
+            }) }}
+        {% endif %}
+
+        {{ forms.textField({
+            label: 'Name'|t('app'),
+            id: 'name',
+            name: 'name',
+            value: automation.name,
+            errors: automation.getErrors('name'),
+            required: true,
+            autofocus: isNew,
+        }) }}
+
+        <hr>
+        <h2>{{ 'When should it run?'|t('autofill') }}</h2>
+
+        {{ forms.lightswitchField({
+            label: 'On a schedule'|t('autofill'),
+            id: 'schedule-enabled',
+            name: 'schedule[enabled]',
+            on: schedule.enabled,
+            toggle: 'schedule-options',
+        }) }}
+        <div id="schedule-options" class="nested-fields{{ not schedule.enabled ? ' hidden' }}">
+            <div class="flex flex-gap-m items-start">
+                {{ forms.selectField({
+                    label: 'Repeat'|t('autofill'),
+                    id: 'schedule-frequency',
+                    name: 'schedule[frequency]',
+                    value: frequencyValue,
+                    toggle: true,
+                    targetPrefix: '.freq-',
+                    options: {
+                        minutes: 'Every few minutes'|t('autofill'),
+                        hours: 'Every few hours'|t('autofill'),
+                        daily: 'Daily'|t('autofill'),
+                        days: 'Every few days'|t('autofill'),
+                        weekly: 'Weekly'|t('autofill'),
+                        monthly: 'Monthly on dates'|t('autofill'),
+                        monthlyWeekday: 'Monthly on a weekday'|t('autofill'),
+                    },
+                }) }}
+                {{ forms.selectField({
+                    label: 'Every'|t('autofill'),
+                    id: 'schedule-minutes',
+                    name: 'schedule[interval][minutes]',
+                    value: schedule.frequency == 'minutes' ? schedule.interval : 15,
+                    options: {5: '5 min'|t('autofill'), 10: '10 min'|t('autofill'), 15: '15 min'|t('autofill'), 20: '20 min'|t('autofill'), 30: '30 min'|t('autofill')},
+                    fieldClass: 'freq-minutes' ~ (frequencyValue != 'minutes' ? ' hidden'),
+                }) }}
+                {% set hourOptions = {} %}
+                {% for h in 1..12 %}
+                    {% set hourOptions = hourOptions|merge([{value: h, label: h == 1 ? 'hour'|t('autofill') : '{n} hours'|t('autofill', {n: h})}]) %}
+                {% endfor %}
+                {{ forms.selectField({
+                    label: 'Every'|t('autofill'),
+                    id: 'schedule-hours',
+                    name: 'schedule[interval][hours]',
+                    value: schedule.frequency == 'hours' ? schedule.interval : 1,
+                    options: hourOptions,
+                    fieldClass: 'freq-hours' ~ (frequencyValue != 'hours' ? ' hidden'),
+                }) }}
+                {% set minuteOptions = {} %}
+                {% for m in [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55] %}
+                    {% set minuteOptions = minuteOptions|merge([{value: m, label: ':' ~ '%02d'|format(m)}]) %}
+                {% endfor %}
+                {{ forms.selectField({
+                    label: 'At minute'|t('autofill'),
+                    id: 'schedule-minute',
+                    name: 'schedule[minute]',
+                    value: schedule.minute,
+                    options: minuteOptions,
+                    fieldClass: 'freq-hours' ~ (frequencyValue != 'hours' ? ' hidden'),
+                }) }}
+                {{ forms.textField({
+                    label: 'Every'|t('autofill'),
+                    id: 'schedule-days',
+                    name: 'schedule[interval][days]',
+                    type: 'number',
+                    min: 2,
+                    max: 365,
+                    size: 4,
+                    unit: 'days'|t('autofill'),
+                    value: schedule.frequency == 'days' ? schedule.interval : 2,
+                    fieldClass: 'freq-days' ~ (frequencyValue != 'days' ? ' hidden'),
+                }) }}
+                {{ forms.selectField({
+                    label: 'On the'|t('autofill'),
+                    id: 'schedule-ordinal',
+                    name: 'schedule[ordinal]',
+                    value: schedule.ordinal,
+                    options: {1: 'First'|t('autofill'), 2: 'Second'|t('autofill'), 3: 'Third'|t('autofill'), 4: 'Fourth'|t('autofill'), last: 'Last'|t('autofill')},
+                    fieldClass: 'freq-monthlyWeekday' ~ (frequencyValue != 'monthlyWeekday' ? ' hidden'),
+                }) }}
+                {{ forms.selectField({
+                    label: 'Day of the week'|t('autofill'),
+                    id: 'schedule-ordinal-weekday',
+                    name: 'schedule[ordinalWeekday]',
+                    value: schedule.ordinalWeekday,
+                    options: weekdayOptions,
+                    labelClass: 'visually-hidden',
+                    fieldClass: 'freq-monthlyWeekday' ~ (frequencyValue != 'monthlyWeekday' ? ' hidden'),
+                }) }}
+            </div>
+
+            {% set weekdayHtml %}
+                <div class="btngroup-container">
+                    <div class="btngroup btngroup--exclusive" data-multi-toggle>
+                        {% for value in 1..7 %}
+                            {% set on = value in weekdaysOn %}
+                            <button type="button" class="btn" aria-pressed="{{ on ? 'true' : 'false' }}" aria-label="{{ locale.getWeekDayName(value % 7) }}">
+                                {{- locale.getWeekDayName(value % 7, 'medium') -}}
+                                <input type="hidden" name="schedule[weekdays][]" value="{{ value }}"{{ not on ? ' disabled' }}>
+                            </button>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endset %}
+            {{ forms.field({
+                label: 'On'|t('autofill'),
+                id: 'schedule-weekdays',
+                fieldset: true,
+                fieldClass: 'freq-weekly' ~ (frequencyValue != 'weekly' ? ' hidden'),
+                errors: frequencyValue == 'weekly' ? automation.getErrors('schedule') : [],
+                fieldAttributes: frequencyValue == 'weekly' and automation.hasErrors('schedule') ? {'aria-describedby': 'schedule-weekdays-errors'} : {},
+            }, weekdayHtml) }}
+
+            {% set monthHtml %}
+                <div class="flex flex-col items-start flex-gap-xs af-month-dates" data-multi-toggle>
+                    {% for week in (1..31)|batch(7)|merge([]) %}
+                        <div class="btngroup btngroup--exclusive">
+                            {% for day in week %}
+                                {% set on = day in datesOn %}
+                                <button type="button" class="btn" aria-pressed="{{ on ? 'true' : 'false' }}">
+                                    {{- day -}}
+                                    <input type="hidden" name="schedule[monthDates][]" value="{{ day }}"{{ not on ? ' disabled' }}>
+                                </button>
+                            {% endfor %}
+                            {% if loop.last %}
+                                {% set on = 'last' in datesOn %}
+                                <button type="button" class="btn" aria-pressed="{{ on ? 'true' : 'false' }}">
+                                    {{- 'Last day'|t('autofill') -}}
+                                    <input type="hidden" name="schedule[monthDates][]" value="last"{{ not on ? ' disabled' }}>
+                                </button>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endset %}
+            {{ forms.field({
+                label: 'On'|t('autofill'),
+                id: 'schedule-month-dates',
+                fieldset: true,
+                fieldClass: 'freq-monthly' ~ (frequencyValue != 'monthly' ? ' hidden'),
+                errors: frequencyValue == 'monthly' ? automation.getErrors('schedule') : [],
+                fieldAttributes: frequencyValue == 'monthly' and automation.hasErrors('schedule') ? {'aria-describedby': 'schedule-month-dates-errors'} : {},
+            }, monthHtml) }}
+
+            {% set timesHtml %}
+                <div class="flex flex-col items-start flex-gap-xs" data-times>
+                    {% for time in schedule.times %}
+                        <div class="flex flex-nowrap flex-gap-xs" data-time-row>
+                            <input type="time" class="text" name="schedule[times][]" value="{{ time }}" aria-label="{{ 'Time {num}'|t('autofill', {num: loop.index}) }}" aria-describedby="schedule-times-tip" required>
+                            <button type="button" class="btn small" data-icon="remove" data-remove-time aria-label="{{ 'Remove time {num}'|t('autofill', {num: loop.index}) }}" title="{{ 'Remove time'|t('autofill') }}"></button>
+                        </div>
+                    {% endfor %}
+                    <button type="button" class="btn small add icon dashed" data-add-time>{{ 'Add a time'|t('autofill') }}</button>
+                </div>
+            {% endset %}
+            {{ forms.field({
+                label: 'At'|t('autofill'),
+                id: 'schedule-times',
+                fieldset: true,
+                tip: 'Site time ({tz})'|t('autofill', {tz: craft.app.timeZone}),
+                fieldClass: 'freq-daily freq-days freq-weekly freq-monthly freq-monthlyWeekday' ~ (frequencyValue not in ['daily', 'days', 'weekly', 'monthly', 'monthlyWeekday'] ? ' hidden'),
+            }, timesHtml) }}
+        </div>
+
+        {# Content changes and watched fields share one trigger in the UI. #}
+        {{ forms.lightswitchField({
+            label: isAsset ? 'When an asset changes'|t('autofill') : 'When an entry changes'|t('autofill'),
+            id: 'changes-enabled',
+            name: 'changes[enabled]',
+            on: changesOn,
+            toggle: 'changes-options',
+        }) }}
+        <div id="changes-options" class="nested-fields{{ not changesOn ? ' hidden' }}">
+            {% set fieldsOption = {label: 'has a field change'|t('autofill'), value: 'fields', toggle: 'fields-uids-field'} %}
+            {{ forms.checkboxGroupField({
+                label: 'Run when it…'|t('autofill'),
+                id: 'events-types',
+                name: 'events[types]',
+                options: isAsset ? [
+                    {label: 'is uploaded'|t('autofill'), value: 'created'},
+                    {label: 'has its file replaced'|t('autofill'), value: 'replaced'},
+                    {label: 'is saved for any reason'|t('autofill'), value: 'saved'},
+                    fieldsOption,
+                ] : [
+                    {label: 'is created'|t('autofill'), value: 'created'},
+                    {label: 'goes live'|t('autofill'), value: 'live'},
+                    {label: 'changes status'|t('autofill'), value: 'statusChanged'},
+                    {label: 'is saved for any reason'|t('autofill'), value: 'saved'},
+                    fieldsOption,
+                ],
+                values: changeTypes,
+                errors: automation.getErrors('events'),
+            }) }}
+            {% set fieldOptions = [] %}
+            {% for field in watchableFields %}
+                {% set fieldOptions = fieldOptions|merge([{label: field.name, value: field.uid}]) %}
+            {% endfor %}
+            {{ forms.selectizeField({
+                label: 'Fields to watch'|t('autofill'),
+                id: 'fields-uids',
+                name: 'fields[uids]',
+                multi: true,
+                options: fieldOptions,
+                values: automation.fields.uids,
+                errors: automation.getErrors('fields'),
+                fieldClass: 'watched-fields' ~ ('fields' not in changeTypes ? ' hidden'),
+            }) }}
+            {{ forms.buttonGroupField({
+                label: 'Start'|t('autofill'),
+                id: 'changes-delay',
+                name: 'changes[delay]',
+                value: changeDelay,
+                options: [
+                    {label: 'Right away'|t('autofill'), value: 0},
+                    {label: 'After 1 min'|t('autofill'), value: 1},
+                    {label: 'After 5 min'|t('autofill'), value: 5},
+                    {label: 'After 15 min'|t('autofill'), value: 15},
+                    {label: 'After 1 hour'|t('autofill'), value: 60},
+                ],
+                tip: 'Waiting turns quick saves into one run.'|t('autofill'),
+            }) }}
+        </div>
+
+        <div role="status">
+            <p id="manual-only" class="light{{ schedule.enabled or changesOn ? ' hidden' }}">
+                {{- 'With both off, it only runs when someone chooses “Run now”.'|t('autofill') -}}
+            </p>
+        </div>
+
+        <hr>
+        <h2 id="which-heading">{{ isAsset ? 'Which assets?'|t('autofill') : 'Which entries?'|t('autofill') }}</h2>
+        {% if not isAsset %}
+            {{ forms.checkboxField({
+                label: 'Only live entries'|t('autofill'),
+                id: 'only-live',
+                name: 'onlyLive',
+                checked: automation.onlyLive,
+                fieldClass: 'only-live',
+            }) }}
+        {% endif %}
+        {{ forms.field({
+            id: 'automation-condition',
+            fieldAttributes: {role: 'group', 'aria-labelledby': 'which-heading', 'aria-describedby': 'automation-condition-instructions'},
+            instructions: isAsset
+                ? 'All assets in {name} that match these rules. Unchanged ones are skipped.'|t('autofill', {name: scopeName})
+                : 'All {name} entries that match these rules. Unchanged ones are skipped.'|t('autofill', {name: scopeName}),
+        }, conditionHtml) }}
+        {# Only meaningful with two or more rules; the script below shows it when there are. #}
+        {{ forms.buttonGroupField({
+            label: 'Run if'|t('autofill'),
+            id: 'match-any',
+            name: 'matchAny',
+            value: automation.matchAny ? '1' : '0',
+            options: [
+                {label: 'All rules match'|t('autofill'), value: '0'},
+                {label: 'Any rule matches'|t('autofill'), value: '1'},
+            ],
+            fieldClass: (automation.condition.conditionRules ?? [])|length < 2 ? 'hidden',
+        }) }}
+
+        {% if siteOptions|length > 1 %}
+            {{ forms.checkboxGroupField({
+                label: 'Sites'|t('app'),
+                id: 'siteIds',
+                name: 'siteIds',
+                options: siteOptions,
+                values: automation.siteIds,
+                errors: automation.getErrors('siteIds'),
+            }) }}
+        {% else %}
+            {% for option in siteOptions %}{{ hiddenInput('siteIds[]', option.value) }}{% endfor %}
+        {% endif %}
+
+        <hr>
+        <button type="button" class="fieldtoggle{{ hasAdvanced ? ' expanded' }}" data-target="automation-advanced">{{ 'Advanced'|t('autofill') }}</button>
+        <div id="automation-advanced" class="{{ not hasAdvanced ? 'hidden' }}">
+
+        {% if workflow.showUserPromptInput %}
+            {{ forms.textareaField({
+                label: 'Additional instructions'|t('autofill'),
+                id: 'userPrompt',
+                name: 'userPrompt',
+                value: automation.userPrompt,
+                rows: 2,
+                instructions: 'Added to the workflow’s prompt.'|t('autofill'),
+                errors: automation.getErrors('userPrompt'),
+            }) }}
+        {% endif %}
+
+        {% if canChooseReviewer %}
+            {{ forms.elementSelectField({
+                label: 'Reviewer'|t('autofill'),
+                id: 'privateOwnerId',
+                name: 'privateOwnerId',
+                elementType: 'craft\\elements\\User',
+                elements: reviewer ? [reviewer] : [],
+                limit: 1,
+                instructions: 'Results from this private workflow go to one person. Defaults to {owner}.'|t('autofill', {owner: workflowOwner.name ?? 'the workflow owner'|t('autofill')}),
+            }) }}
+        {% endif %}
+
+            <div class="flex flex-gap-m items-start">
+                {{ forms.textField({
+                    label: 'Items per run'|t('autofill'),
+                    id: 'maxItemsPerRun',
+                    name: 'maxItemsPerRun',
+                    type: 'number',
+                    min: 1,
+                    size: 6,
+                    value: automation.maxItemsPerRun,
+                    placeholder: 'No limit'|t('autofill'),
+                    tip: 'Extra items wait for the next run.'|t('autofill'),
+                    errors: automation.getErrors('maxItemsPerRun'),
+                }) }}
+                {{ forms.textField({
+                    label: 'Wait between runs'|t('autofill'),
+                    id: 'minMinutesBetweenRuns',
+                    name: 'minMinutesBetweenRuns',
+                    type: 'number',
+                    min: 1,
+                    size: 6,
+                    unit: 'min'|t('autofill'),
+                    value: automation.minMinutesBetweenRuns,
+                    tip: 'Skips triggers that come sooner.'|t('autofill'),
+                    errors: automation.getErrors('minMinutesBetweenRuns'),
+                }) }}
+                {{ forms.textField({
+                    label: 'Stop after'|t('autofill'),
+                    id: 'maxRuns',
+                    name: 'maxRuns',
+                    type: 'number',
+                    min: 1,
+                    size: 6,
+                    unit: 'runs'|t('autofill'),
+                    value: automation.maxRuns,
+                    tip: 'Then it pauses. Each change it reacts to counts as a run.'|t('autofill'),
+                    errors: automation.getErrors('maxRuns'),
+                }) }}
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}
+
+{% css %}
+    .af-month-dates .btn { min-inline-size: calc(40rem / 16); justify-content: center; }
+    #schedule-options, #changes-options { margin: 0; padding-block: 0; padding-inline: var(--m) 0; border-inline-start: 2px solid var(--hairline-color); }
+    #schedule-options:not(.hidden), #changes-options:not(.hidden) { margin-block-end: var(--l); }
+    /* Sit the field picker directly under its "has a field change" checkbox. */
+    #events-types-field:has(+ #fields-uids-field:not(.hidden)) { margin-block-end: 0; }
+    #events-types-field + #fields-uids-field.watched-fields { margin-block-start: 8px !important; margin-inline-start: 26px; padding-block-start: 0; }
+    #fields-uids-field.watched-fields > .heading { margin-block-end: 4px; }
+    #fields-uids-field.watched-fields > .heading label { font-weight: normal; }
+    #schedule-options > .field:last-child, #changes-options > .field:last-child { padding-block-end: 0; }
+    [data-times] > [data-time-row]:only-of-type [data-remove-time] { visibility: hidden; }
+    #details a.error { color: var(--red-700) !important; }
+    @media (width <= 400px) {
+        .af-month-dates, .af-month-dates .btngroup, #schedule-weekdays-field .btngroup { inline-size: 100%; }
+        .af-month-dates .btn, #schedule-weekdays-field .btngroup .btn { flex: 1 1 0; min-inline-size: 0; padding-inline: var(--xs); }
+    }
+    @media (forced-colors: active) {
+        [data-multi-toggle] .btn[aria-pressed="true"], #changes-delay .btn[aria-pressed="true"] { outline: 2px solid CanvasText; outline-offset: -4px; }
+    }
+{% endcss %}
+{% do view.registerTranslations('autofill', ['Time {num}', 'Remove time {num}']) %}
+
+{% js %}
+(() => {
+    // Multi-select button groups: a pressed button submits its hidden input.
+    document.querySelectorAll('[data-multi-toggle] .btn').forEach((button) => button.addEventListener('click', () => {
+        const on = button.getAttribute('aria-pressed') !== 'true';
+        button.setAttribute('aria-pressed', on ? 'true' : 'false');
+        button.querySelector('input').disabled = !on;
+    }));
+
+    // Craft lightswitches fire jQuery change events.
+    const manualHint = document.getElementById('manual-only');
+    if (manualHint) {
+        const switches = ['schedule-enabled', 'changes-enabled'].map((id) => document.getElementById(id)).filter(Boolean);
+        const update = () => manualHint.classList.toggle('hidden', switches.some((s) => s.getAttribute('aria-checked') === 'true'));
+        switches.forEach((s) => $(s).on('change', update));
+    }
+
+    // Craft's condition builder swaps rules in with htmx, so watch it for the rule count.
+    const builder = document.getElementById('automation-condition');
+    const matchField = document.getElementById('match-any-field');
+    if (builder && matchField) {
+        const update = () => matchField.classList.toggle('hidden', builder.querySelectorAll('.condition-rule').length < 2);
+        new MutationObserver(update).observe(builder, {childList: true, subtree: true});
+        update();
+    }
+
+    const times = document.querySelector('[data-times]');
+    if (!times) return;
+    const addButton = times.querySelector('[data-add-time]');
+    const template = times.querySelector('[data-time-row]').cloneNode(true);
+    // Number the rows so screen reader and voice users can tell them apart.
+    const renumber = () => times.querySelectorAll('[data-time-row]').forEach((row, i) => {
+        row.querySelector('input').setAttribute('aria-label', Craft.t('autofill', 'Time {num}', {num: i + 1}));
+        row.querySelector('[data-remove-time]').setAttribute('aria-label', Craft.t('autofill', 'Remove time {num}', {num: i + 1}));
+    });
+    addButton.addEventListener('click', () => {
+        const row = template.cloneNode(true);
+        const last = [...times.querySelectorAll('input[type=time]')].pop()?.value || '08:00';
+        const [h, m] = last.split(':').map(Number);
+        row.querySelector('input').value = `${String((h + 1) % 24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        addButton.before(row);
+        renumber();
+        row.querySelector('input').focus();
+    });
+    times.addEventListener('click', (event) => {
+        const button = event.target instanceof Element ? event.target.closest('[data-remove-time]') : null;
+        if (!button || times.querySelectorAll('[data-time-row]').length <= 1) return;
+        button.closest('[data-time-row]').remove();
+        renumber();
+        addButton.focus();
+    });
+})();
+{% endjs %}

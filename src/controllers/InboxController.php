@@ -20,17 +20,30 @@ class InboxController extends Controller
         $this->requireInbox();
         $actor = Craft::$app->getUser()->getIdentity();
         $service = AutofillPlugin::getInstance()->getWorkflowRunService();
-        $status = (string)Craft::$app->getRequest()->getQueryParam('status', 'ready');
-        if (!in_array($status, ['ready', 'queued', 'running', 'completed', 'failed'], true)) $status = 'ready';
+        $automations = AutofillPlugin::getInstance()->getAutomationService();
+        $automationId = (int)Craft::$app->getRequest()->getQueryParam('automation', 0) ?: null;
+        $automation = $automationId ? $automations->getById($automationId) : null;
+        // Filtering never reveals runs; it only narrows the runs this person can already see.
+        if ($automation !== null && !$automations->canManage($automation, $actor)) $automation = null;
+        // An automation's history opens on all of its runs.
+        $status = (string)Craft::$app->getRequest()->getQueryParam('status', $automationId ? 'all' : 'ready');
+        if (!in_array($status, ['all', 'ready', 'queued', 'running', 'completed', 'failed'], true) || ($status === 'all' && $automationId === null)) {
+            $status = 'ready';
+        }
+        $query = WorkflowRunRecord::find()->orderBy(['id' => SORT_DESC]);
+        if ($status !== 'all') $query->where(['status' => $status]);
+        if ($automationId !== null) $query->andWhere(['automationId' => $automationId]);
         $runs = [];
-        foreach (WorkflowRunRecord::find()->where(['status' => $status])->orderBy(['id' => SORT_DESC])->each() as $run) {
+        foreach ($query->each() as $run) {
             if (!$service->canView($run, $actor)) continue;
             $runs[] = $service->payload($run, $actor) + ['initiatorId' => $run->initiatorId];
             if (count($runs) >= 100) break;
         }
         $initiatorIds = array_values(array_unique(array_filter(array_column($runs, 'initiatorId'))));
         $initiators = $initiatorIds === [] ? [] : User::find()->id($initiatorIds)->status(null)->indexBy('id')->all();
-        return $this->renderTemplate('autofill/cp/inbox/index', compact('runs', 'status', 'initiators'));
+        $automationNames = $automations->namesById(array_column($runs, 'automationId'));
+        $automationFilter = $automationId !== null ? ['id' => $automationId, 'editable' => $automation !== null, 'name' => $automation?->name ?? ($automationNames[$automationId] ?? null)] : null;
+        return $this->renderTemplate('autofill/cp/inbox/index', compact('runs', 'status', 'initiators', 'automationNames', 'automationFilter'));
     }
 
     public function actionReview(int $runId): Response

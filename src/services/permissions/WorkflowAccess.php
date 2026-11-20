@@ -27,6 +27,8 @@ class WorkflowAccess extends Component
             'reviewOthers' => 'Review other users’ public results',
             'automatic' => 'Configure automatic application', 'delete' => 'Archive own workflows',
             'deleteOthers' => 'Archive other users’ public workflows',
+            'automations' => 'Manage own automations',
+            'automationsOthers' => 'Manage other users’ automations',
         ];
         $permissions = [];
         foreach ($labels as $key => $label) {

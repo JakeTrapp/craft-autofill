@@ -1,0 +1,114 @@
+{% extends '_layouts/cp.twig' %}
+{% set title = 'Automations'|t('autofill') %}
+{% set selectedSubnavItem = 'automations' %}
+{% do view.registerAssetBundle('craft\\web\\assets\\admintable\\AdminTableAsset') %}
+
+{% block actionButton %}
+    {% if canCreate %}
+        {% if newItems|length > 1 %}
+            {{ disclosureMenu(newItems, {
+                buttonLabel: 'New automation'|t('autofill'),
+                buttonAttributes: {class: ['submit', 'add', 'icon']},
+            }) }}
+        {% else %}
+            <a class="btn submit add icon" href="{{ url('autofill/automations/new') }}">{{ 'New automation'|t('autofill') }}</a>
+        {% endif %}
+    {% endif %}
+{% endblock %}
+
+{% if usingFallback and currentUser.admin %}
+    {% set contentNotice %}
+        <div class="content-notice">
+            <div class="content-notice-icon" aria-hidden="true"><div class="cp-icon">{{ iconSvg('clock') }}</div></div>
+            <p>
+                {{ 'Schedules may run late. For exact timing, run this every minute with cron:'|t('autofill') }}
+                {% include '_includes/forms/copytextbtn' with {value: 'php craft autofill/automations/tick'} only %}
+            </p>
+        </div>
+    {% endset %}
+{% endif %}
+
+{% block content %}
+    {% if rows is empty %}
+        <div class="zilch">
+            <p>{{ 'No automations yet.'|t('autofill') }}</p>
+            <p class="smalltext">{{ 'Run a workflow on a schedule or when content changes. Results wait in the inbox for review.'|t('autofill') }}</p>
+        </div>
+    {% else %}
+        <div id="autofill-automations-admin-table"></div>
+    {% endif %}
+{% endblock %}
+
+{% set tableData = [] %}
+{% set triggerIcons = {schedule: 'clock', changes: 'bolt'} %}
+{% for row in rows %}
+    {% set automation = row.automation %}
+    {% set whenCell %}
+        {% if automation.isPaused() %}
+            <span class="status-label orange">{{ statusIndicator('orange', {label: null}) }}<span class="status-label-text">{{ 'Paused'|t('autofill') }}</span></span>
+            <div class="smalltext">
+                {{ automation.pausedReason|t('autofill') }}
+                {% if row.workflow and not row.workflow.archived %}<a href="{{ url('autofill/automations/' ~ automation.id) }}">{{ 'Open to resume'|t('autofill') }}<span class="visually-hidden"> {{ automation.name }}</span></a>{% endif %}
+            </div>
+        {% elseif not automation.enabled %}
+            <span class="status-label">{{ statusIndicator('disabled', {label: null}) }}<span class="status-label-text">{{ 'Disabled'|t('app') }}</span></span>
+        {% endif %}
+        {% if not row.workflow %}
+            <div class="smalltext light">{{ 'Unavailable workflow'|t('autofill') }}</div>
+        {% endif %}
+        <div class="flex flex-col items-start gap-2xs{{ automation.isPaused() ? ' light' }}">
+            {% for key, text in row.triggers %}
+                <div class="flex flex-nowrap items-start gap-xs"><span class="cp-icon small" aria-hidden="true">{{ iconSvg(triggerIcons[key] ?? 'clock') }}</span><span>{{ text }}</span></div>
+            {% else %}
+                <div class="flex flex-nowrap items-start gap-xs light"><span class="cp-icon small" aria-hidden="true">{{ iconSvg('hand-pointer') }}</span><span>{{ 'Only when run by hand'|t('autofill') }}</span></div>
+            {% endfor %}
+        </div>
+        {% if automation.isActive() and automation.nextRunAt %}
+            <div class="smalltext light">{{ 'Next: {time}'|t('autofill', {time: automation.nextRunAt|timestamp('short')}) }}</div>
+        {% endif %}
+    {% endset %}
+    {% set lastRunCell %}{% include 'autofill/cp/automations/_last-run' %}{% endset %}
+    {% set tableData = tableData|merge([{
+        id: automation.id,
+        title: automation.name,
+        url: url('autofill/automations/' ~ automation.id),
+        icon: row.icon,
+        status: automation.isActive(),
+        workflow: row.workflow.name ?? '',
+        triggersText: row.triggers|join(' '),
+        owner: row.owner.name ?? '',
+        when: whenCell|trim,
+        lastRun: lastRunCell|trim,
+    }]) %}
+{% endfor %}
+
+{% if rows is not empty %}
+{% js %}
+    new Craft.VueAdminTable({
+        container: '#autofill-automations-admin-table',
+        columns: [
+            {name: '__slot:title', title: {{ 'Automation'|t('autofill')|json_encode|raw }}},
+            {name: 'when', title: {{ 'When'|t('autofill')|json_encode|raw }}},
+            {name: 'lastRun', title: {{ 'Last run'|t('autofill')|json_encode|raw }}},
+        ],
+        tableData: {{ tableData|json_encode|raw }},
+        checkboxes: true,
+        actions: [
+            {
+                label: {{ 'Set Status'|t('app')|json_encode|raw }},
+                actions: [
+                    {label: {{ 'Enabled'|t('app')|json_encode|raw }}, action: 'autofill/automations/set-status', param: 'status', value: 'enabled', status: 'enabled'},
+                    {label: {{ 'Disabled'|t('app')|json_encode|raw }}, action: 'autofill/automations/set-status', param: 'status', value: 'disabled', status: 'disabled'},
+                ],
+            },
+        ],
+        search: true,
+        searchParams: ['title', 'workflow', 'triggersText', 'owner'],
+        itemLabels: {singular: {{ 'automation'|t('autofill')|json_encode|raw }}, plural: {{ 'automations'|t('autofill')|json_encode|raw }}},
+        emptyMessage: {{ 'No automations yet.'|t('autofill')|json_encode|raw }},
+        deleteAction: 'autofill/automations/delete',
+        deleteConfirmationMessage: {{ 'Delete “{name}”? Results it already created stay in the inbox.'|t('autofill')|json_encode|raw }},
+        deleteSuccessMessage: {{ '“{name}” deleted.'|t('autofill')|json_encode|raw }},
+    });
+{% endjs %}
+{% endif %}

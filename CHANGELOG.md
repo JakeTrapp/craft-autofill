@@ -1,5 +1,17 @@
 # Release Notes for Autofill
 
+## Unreleased
+
+### Added
+
+- Added Automations (Autofill Pro). An automation runs a workflow on a schedule, when entries or assets are created, saved, go live or change status, or when chosen fields change. Its results wait in the inbox like any other run.
+- “Goes live” and “Changes status” also fire when an entry publishes or expires by date, without anyone saving it.
+- Schedule times keep their wall-clock time through daylight saving changes. A time in the hour skipped in spring runs an hour later that day.
+- Automations can be narrowed with Craft’s condition builder and limited to chosen sites. Items whose context fields haven’t changed since the automation last ran on them are skipped.
+- Added the `autofill/automations/tick` console command. Run it every minute with cron for exact schedule timing; without it, scheduled automations are checked after control panel and queue requests.
+- Added the “Manage own automations” and “Manage other users’ automations” permissions.
+- The inbox can be filtered to one automation, and shows which automation started each run.
+
 ## 2.2.0 - 2026-11-11
 
 ### Changed

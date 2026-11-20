@@ -3,19 +3,32 @@
 {% set selectedSubnavItem = 'inbox' %}
 {% do view.registerAssetBundle('craft\\web\\assets\\admintable\\AdminTableAsset') %}
 {% set statuses = {ready: 'Ready to review', queued: 'Queued', running: 'Running', completed: 'Completed', failed: 'Failed'} %}
-{% if runs|length == 100 %}
-    {% set contentNotice = 'Showing the latest 100 accessible runs in this view.'|t('autofill') %}
-{% endif %}
+{% if automationFilter %}{% set statuses = {all: 'All runs'}|merge(statuses) %}{% endif %}
+{% set statusLabels = statuses|merge({cancelled: 'Dismissed', superseded: 'Regenerated'}) %}
+{% set filterParams = automationFilter ? {automation: automationFilter.id} : {} %}
+{% set contentNotice %}
+    {% if automationFilter %}
+        <div class="content-notice">
+            <div class="content-notice-icon" aria-hidden="true"><div class="cp-icon">{{ iconSvg('filter') }}</div></div>
+            {% set automationName = automationFilter.name ?? 'a deleted automation'|t('autofill') %}
+            <p>
+                {{ 'Results from {name}.'|t('autofill', {name: automationFilter.editable ? ('<a href="' ~ url('autofill/automations/' ~ automationFilter.id) ~ '">' ~ automationName|e ~ '</a>') : automationName|e})|raw }}
+                <a href="{{ url('autofill/inbox', {status: status == 'all' ? 'ready' : status}) }}">{{ 'Remove filter'|t('autofill') }}</a>
+            </p>
+        </div>
+    {% endif %}
+{% endset %}
 
 {% block sidebar %}
     <nav aria-label="{{ 'Run status'|t('autofill') }}"><ul>
         {% for value, label in statuses %}
-            <li><a href="{{ url('autofill/inbox', {status: value}) }}"{% if status == value %} class="sel" aria-current="page"{% endif %}>{{ label|t('autofill') }}</a></li>
+            <li><a href="{{ url('autofill/inbox', filterParams|merge({status: value})) }}"{% if status == value %} class="sel" aria-current="page"{% endif %}>{{ label|t('autofill') }}</a></li>
         {% endfor %}
     </ul></nav>
 {% endblock %}
 
 {% block content %}
+    {% if runs|length == 100 %}<p class="light smalltext">{{ 'Showing the latest 100 accessible runs in this view.'|t('autofill') }}</p>{% endif %}
     <div data-autofill-inbox>
         <div id="autofill-inbox-admin-table"></div>
     </div>
@@ -23,7 +36,7 @@
 
 {% set tableData = [] %}
 {% for run in runs %}
-    {% set statusLabel = run.status == 'ready' ? 'Review'|t('autofill') : statuses[run.status]|t('autofill') %}
+    {% set statusLabel = run.status == 'ready' ? 'Review'|t('autofill') : (statusLabels[run.status] ?? run.status|title)|t('autofill') %}
     {% set statusCell %}
         {{ statusLabel }}
         {% if run.error %}<div class="smalltext error">{{ run.error }}</div>{% endif %}
@@ -35,10 +48,29 @@
             </button>
         {% endif %}
     {% endset %}
+    {% set initiatorCell %}
+        {% if run.automationId %}
+            <span class="flex flex-nowrap flex-gap-xs">
+                <span class="cp-icon small">{{ iconSvg('robot', null, 'Automation'|t('autofill')) }}</span>
+                {% if automationNames[run.automationId] is defined %}
+                    <a href="{{ url('autofill/inbox', {automation: run.automationId, status: status}) }}">{{ automationNames[run.automationId] }}<span class="visually-hidden">{{ ' – show its runs'|t('autofill') }}</span></a>
+                {% else %}
+                    <span class="light">{{ 'Deleted automation'|t('autofill') }}</span>
+                {% endif %}
+            </span>
+        {% elseif initiators[run.initiatorId] is defined %}
+            {{ elementChip(initiators[run.initiatorId]) }}
+        {% else %}
+            <span class="light">{{ 'Unknown user'|t('autofill') }}</span>
+        {% endif %}
+    {% endset %}
     {% set tableData = tableData|merge([{
         id: run.id, title: run.elementTitle, url: url('autofill/inbox/' ~ run.id),
         workflow: run.workflowName,
-        initiator: initiators[run.initiatorId].name ?? 'Unknown user'|t('autofill'),
+        initiator: run.automationId
+            ? automationNames[run.automationId] ?? 'Deleted automation'|t('autofill')
+            : initiators[run.initiatorId].name ?? 'Unknown user'|t('autofill'),
+        initiatorCell: initiatorCell|trim,
         statusLabel: statusLabel,
         statusCell: statusCell|trim,
         dismissButton: dismissButton|trim,
@@ -55,8 +87,10 @@
         container: '#autofill-inbox-admin-table',
         columns: [
             {name: '__slot:title', title: {{ 'Content'|t('app')|json_encode|raw }}},
+            {% if not automationFilter %}
             {name: 'workflow', title: {{ 'Workflow'|t('autofill')|json_encode|raw }}, callback: Craft.escapeHtml},
-            {name: 'initiator', title: {{ 'Started by'|t('autofill')|json_encode|raw }}, callback: Craft.escapeHtml},
+            {name: 'initiatorCell', title: {{ 'Started by'|t('autofill')|json_encode|raw }}},
+            {% endif %}
             {name: 'statusCell', title: {{ 'Status'|t('app')|json_encode|raw }}},
             {name: 'dismissButton', title: ''},
         ],
@@ -68,7 +102,7 @@
             window.location.assign(row.url);
         },
         itemLabels: {singular: {{ 'run'|t('autofill')|json_encode|raw }}, plural: {{ 'runs'|t('autofill')|json_encode|raw }}},
-        emptyMessage: {{ 'No runs in this view.'|t('autofill')|json_encode|raw }},
+        emptyMessage: {{ (automationFilter ? 'No runs from this automation in this view.' : 'No runs in this view.')|t('autofill')|json_encode|raw }},
     });
 
     document.querySelector('[data-autofill-inbox]')?.addEventListener('click', async (event) => {

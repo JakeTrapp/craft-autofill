@@ -33,7 +33,7 @@ class WorkflowRunService extends Component
      * @param bool $deferQueue Leave the generation job unpushed so a caller holding a DB transaction can
      * push it after commit with queue(). Otherwise a non-DB queue could run the job before the row exists.
      */
-    public function start(Workflow $workflow, ElementInterface $element, User $actor, string $prompt = '', ?string $batchUid = null, ?int $privateOwnerId = null, bool $deferQueue = false): WorkflowRunRecord
+    public function start(Workflow $workflow, ElementInterface $element, User $actor, string $prompt = '', ?string $batchUid = null, ?int $privateOwnerId = null, bool $deferQueue = false, ?int $automationId = null): WorkflowRunRecord
     {
         $this->failStaleRuns();
         $plugin = AutofillPlugin::getInstance();
@@ -63,7 +63,7 @@ class WorkflowRunService extends Component
             $definition = $this->definitionForActor($workflow, $element, $actor);
             $run = new WorkflowRunRecord();
             $run->setAttributes([
-                'workflowId' => $workflow->id, 'initiatorId' => $actor->id, 'visibility' => $workflow->visibility,
+                'workflowId' => $workflow->id, 'automationId' => $automationId, 'initiatorId' => $actor->id, 'visibility' => $workflow->visibility,
                 'privateOwnerId' => $privateOwnerId,
                 'elementId' => $element->id, 'elementType' => $element instanceof Asset ? 'asset' : 'entry',
                 'siteId' => $element->siteId, 'batchUid' => $batchUid, 'status' => 'queued',
@@ -83,16 +83,16 @@ class WorkflowRunService extends Component
      * Records a bulk item that couldn't start (for example, missing permission) so it shows under Failed in the inbox
      * instead of disappearing. Repeated attempts for the same batch item are recorded once.
      */
-    public function recordFailedStart(Workflow $workflow, ElementInterface $element, User $actor, string $batchUid, string $message): void
+    public function recordFailedStart(Workflow $workflow, ElementInterface $element, User $actor, string $batchUid, string $message, ?int $automationId = null, ?int $privateOwnerId = null): void
     {
         $exists = WorkflowRunRecord::find()->where([
             'batchUid' => $batchUid, 'elementId' => $element->id, 'siteId' => $element->siteId, 'status' => 'failed',
         ])->exists();
         if ($exists) return;
-        $privateOwnerId = $workflow->visibility === 'private' ? ($workflow->ownerId ?? (int)$actor->id) : null;
+        $privateOwnerId = $workflow->visibility === 'private' ? ($privateOwnerId ?? $workflow->ownerId ?? (int)$actor->id) : null;
         $run = new WorkflowRunRecord();
         $run->setAttributes([
-            'workflowId' => $workflow->id, 'initiatorId' => $actor->id, 'visibility' => $workflow->visibility,
+            'workflowId' => $workflow->id, 'automationId' => $automationId, 'initiatorId' => $actor->id, 'visibility' => $workflow->visibility,
             'privateOwnerId' => $privateOwnerId,
             'elementId' => $element->id, 'elementType' => $element instanceof Asset ? 'asset' : 'entry',
             'siteId' => $element->siteId, 'batchUid' => $batchUid, 'status' => 'failed',
@@ -450,6 +450,7 @@ class WorkflowRunService extends Component
         $stale['outputs'] = array_values(array_intersect($stale['outputs'], $visibleUids));
         return [
             'id' => (int)$run->id, 'status' => $run->status, 'visibility' => $run->visibility,
+            'automationId' => $run->automationId !== null ? (int)$run->automationId : null,
             'elementId' => (int)$run->elementId, 'siteId' => (int)$run->siteId, 'elementType' => $run->elementType,
             'elementTitle' => $element->title, 'editUrl' => $element->getCpEditUrl(), 'workflowName' => $workflow->name,
             'suggestions' => $suggestions, 'error' => $run->errorMessage,
@@ -592,6 +593,29 @@ class WorkflowRunService extends Component
         }
         unset($suggestion);
         return $changed;
+    }
+
+    /**
+     * Fingerprint of the workflow's context fields only. Output fields are left out, so applying
+     * a result doesn't look like a content change that should trigger the automation again.
+     */
+    public function contextFingerprint(Workflow $workflow, ElementInterface $element): string
+    {
+        $parts = [];
+        foreach ($workflow->contextRows as $row) {
+            if ($row['enabled'] ?? true) $parts[(string)$row['fieldUid']] = $this->fingerprint($element, (string)$row['fieldUid'], $row['assets'] ?? []);
+        }
+        ksort($parts);
+        return hash('sha256', Json::encode($parts));
+    }
+
+    /** @param string[] $uids Layout element UIDs, `__native__:<attribute>` or `__asset__:file`. */
+    public function fieldsFingerprint(ElementInterface $element, array $uids): string
+    {
+        $parts = [];
+        foreach ($uids as $uid) $parts[$uid] = $this->fingerprint($element, $uid, $uid === '__asset__:file' ? ['includeFile' => true] : []);
+        ksort($parts);
+        return hash('sha256', Json::encode($parts));
     }
 
     private function baseline(Workflow $workflow, ElementInterface $element): array

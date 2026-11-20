@@ -11,6 +11,7 @@ use craft\db\ActiveRecord;
  *
  * @property int $id
  * @property int $workflowId
+ * @property int|null $automationId
  * @property int|null $initiatorId
  * @property string $visibility
  * @property int|null $privateOwnerId
