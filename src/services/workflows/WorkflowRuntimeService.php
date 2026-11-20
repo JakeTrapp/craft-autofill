@@ -29,6 +29,9 @@ use Throwable;
 /** The same scope, prompt and application rules serve every editor launcher. */
 class WorkflowRuntimeService extends Component
 {
+    /** Greater than zero while Autofill is saving an applied result. */
+    public static int $applying = 0;
+
     public function resolve(string $handle, int $elementId, ?int $siteId = null): array
     {
         $workflow = AutofillPlugin::getInstance()->getWorkflowService()->getByHandle($handle);
@@ -517,7 +520,14 @@ class WorkflowRuntimeService extends Component
             $element->setScenario($previousScenario);
         }
         // Validation already ran for the changed attribute. Update the search index so applied text is searchable.
-        if (!Craft::$app->getElements()->saveElement($element, false, false, true)) {
+        // Automations ignore saves made while applying results, so a run can't trigger another run.
+        self::$applying++;
+        try {
+            $saved = Craft::$app->getElements()->saveElement($element, false, false, true);
+        } finally {
+            self::$applying--;
+        }
+        if (!$saved) {
             throw new RuntimeException(implode(' ', $element->getErrorSummary(true)) ?: 'The suggestion could not be saved.');
         }
     }

@@ -1,0 +1,19 @@
+{# Last run time with a summary. Expects `automation`. #}
+{% if automation.lastRunAt %}
+    {% set summary = automation.lastRunSummary ?? {} %}
+    {% set started = summary.started ?? 0 %}
+    {% set failed = summary.failed ?? 0 %}
+    <a href="{{ url('autofill/inbox', {automation: automation.id}) }}">{{ automation.lastRunAt|timestamp('short') }}<span class="visually-hidden">{{ ' – view results'|t('autofill') }}</span></a>
+    <div class="smalltext light">
+        {%- if started or failed -%}
+            {{- '{count} started'|t('autofill', {count: started}) -}}
+            {%- if failed %}, <a class="error" href="{{ url('autofill/inbox', {automation: automation.id, status: 'failed'}) }}">{{ '{count} failed'|t('autofill', {count: failed}) }}</a>{% endif -%}
+        {%- elseif (summary.skipped ?? 0) > 0 -%}
+            {{- 'All up to date'|t('autofill') -}}
+        {%- else -%}
+            {{- 'Nothing matched'|t('autofill') -}}
+        {%- endif -%}
+    </div>
+{% else %}
+    <span class="light">{{ 'Never'|t('autofill') }}</span>
+{% endif %}

@@ -39,6 +39,7 @@ use yii\base\ModelEvent;
  * @method FieldDiscoveryService getFieldDiscoveryService()
  * @method EntryTypeFieldResolverService getEntryTypeFieldResolverService()
  * @method \jtdev\craftautofill\services\agents\AgentApi getAgentApi()
+ * @method \jtdev\craftautofill\services\automations\AutomationService getAutomationService()
  * @author JTDev <jake.trapp02@gmail.com>
  * @copyright JTDev
  * @license https://craftcms.github.io/license/ Craft License
@@ -48,7 +49,7 @@ class AutofillPlugin extends Plugin
     public const EDITION_LITE = 'lite';
     public const EDITION_PRO = 'pro';
 
-    public string $schemaVersion = '2.1.3';
+    public string $schemaVersion = '2.3.1';
     public bool $hasCpSettings = true;
     public bool $hasCpSection = true;
 
@@ -76,6 +77,7 @@ class AutofillPlugin extends Plugin
                 'fieldDiscoveryService' => FieldDiscoveryService::class,
                 'entryTypeFieldResolverService' => EntryTypeFieldResolverService::class,
                 'agentApi' => \jtdev\craftautofill\services\agents\AgentApi::class,
+                'automationService' => \jtdev\craftautofill\services\automations\AutomationService::class,
             ],
         ];
     }
@@ -135,6 +137,11 @@ class AutofillPlugin extends Plugin
     public function getWorkflowRuntimeService(): \jtdev\craftautofill\services\workflows\WorkflowRuntimeService
     {
         return $this->get('workflowRuntimeService');
+    }
+
+    public function getAutomationService(): \jtdev\craftautofill\services\automations\AutomationService
+    {
+        return $this->get('automationService');
     }
 
     public function getAiService(): AiService
@@ -205,10 +212,32 @@ class AutofillPlugin extends Plugin
         if (!Craft::$app->getUser()->getIsAdmin()) {
             unset($item['subnav']['logs']);
         }
+        if ($actor && $this->isProEdition() && $this->getAutomationService()->canAccessSection($actor)) {
+            $item['subnav'] = $this->insertAfter($item['subnav'], 'bulk', ['automations' => ['label' => Craft::t('autofill', 'Automations'), 'url' => 'autofill/automations']]);
+        }
         if (Craft::$app->getUser()->getIdentity() !== null) {
             $item['subnav'] = ['workflows' => ['label' => 'Workflows', 'url' => 'autofill/workflows']] + $item['subnav'];
         }
         return $item;
+    }
+
+    /** Inserts subnav items after $key, or before Logs when $key is missing. */
+    private function insertAfter(array $items, string $key, array $insert): array
+    {
+        $result = [];
+        $inserted = false;
+        foreach ($items as $itemKey => $item) {
+            if (!$inserted && $itemKey === 'logs' && !isset($items[$key])) {
+                $result += $insert;
+                $inserted = true;
+            }
+            $result[$itemKey] = $item;
+            if ($itemKey === $key) {
+                $result += $insert;
+                $inserted = true;
+            }
+        }
+        return $inserted ? $result : $result + $insert;
     }
 
     public function isProEdition(): bool
@@ -387,8 +416,36 @@ class AutofillPlugin extends Plugin
                 $event->rules['autofill/inbox/<runId:\d+>'] = 'autofill/inbox/review';
                 $event->rules['autofill/bulk'] = 'autofill/bulk/index';
                 $event->rules['autofill/logs'] = 'autofill/logs/index';
+                $event->rules['autofill/automations'] = 'autofill/automations/index';
+                $event->rules['autofill/automations/new'] = 'autofill/automations/edit';
+                $event->rules['autofill/automations/<automationId:\d+>'] = 'autofill/automations/edit';
             }
         );
+
+        Event::on(\craft\services\Elements::class, \craft\services\Elements::EVENT_BEFORE_SAVE_ELEMENT,
+            static function(\craft\events\ElementEvent $event): void {
+                self::getInstance()->getAutomationService()->beforeElementSave($event);
+            }
+        );
+        Event::on(\craft\services\Elements::class, \craft\services\Elements::EVENT_AFTER_SAVE_ELEMENT,
+            static function(\craft\events\ElementEvent $event): void {
+                self::getInstance()->getAutomationService()->afterElementSave($event);
+            }
+        );
+        // A content change that waited on an earlier result runs once that result is reviewed, cancelled, or finishes.
+        Event::on(\jtdev\craftautofill\records\WorkflowRunRecord::class, \yii\db\BaseActiveRecord::EVENT_AFTER_UPDATE,
+            static function(\yii\db\AfterSaveEvent $event): void {
+                if (array_key_exists('status', $event->changedAttributes)) {
+                    /** @var \jtdev\craftautofill\records\WorkflowRunRecord $run */
+                    $run = $event->sender;
+                    self::getInstance()->getAutomationService()->resumeAfterRun($run);
+                }
+            }
+        );
+        // Without cron, scheduled automations are checked after web requests (including Craft's web queue runner).
+        Event::on(\craft\web\Application::class, \craft\web\Application::EVENT_AFTER_REQUEST, static function(): void {
+            self::getInstance()->getAutomationService()->fallbackTick();
+        });
 
         // Craft's garbage collection also fails runs whose queue worker died, so they don't block new runs.
         Event::on(\craft\services\Gc::class, \craft\services\Gc::EVENT_RUN, static function(): void {

@@ -44,6 +44,17 @@ final class WorkflowAccessTest extends TestCase
         self::assertFalse($access->canEdit($workflow, $editor));
     }
 
+    public function testAutomationPermissionsAreRegistered(): void
+    {
+        $definitions = WorkflowAccess::permissionDefinitions();
+        self::assertSame('Manage own automations', $definitions['autofill-automations']['label']);
+        self::assertSame('Manage other users’ automations', $definitions['autofill-automationsOthers']['label']);
+        $access = new WorkflowAccess();
+        self::assertTrue($access->can($this->user(10, ['autofill-automations']), 'automations'));
+        self::assertFalse($access->can($this->user(10, ['autofill-automations']), 'automationsOthers'));
+        self::assertTrue($access->can($this->user(10, admin: true), 'automationsOthers'));
+    }
+
     public function testCreatingAndEditingAreIndependentCapabilities(): void
     {
         $access = new WorkflowAccess();
